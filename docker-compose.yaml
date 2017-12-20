@@ -1,0 +1,22 @@
+version: '2.2'
+services:
+  memcached:
+    image: memcached
+  backend:
+    environment:
+      - WARGAMING_API
+      - MEMCACHE_HOSTNAME=memcached
+    build: ./battles
+    command: ./manage.py runserver 0.0.0.0:8000
+    links:
+      - "memcached"
+  frontend:
+    build: ./static
+    command: serve -s /src/build
+  balancer:
+    build: ./nginx
+    links:
+      - "backend"
+      - "frontend"
+    ports:
+      - "8000:80"

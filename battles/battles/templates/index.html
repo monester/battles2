@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>WOT battles</title>
+    <script src="https://unpkg.com/react@16/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@16/umd/react-dom.production.min.js"></script>
+  </head>
+  <body>
+    <h1>Battles</h1>
+    <div id="container">test</div>
+    <script type="text/javascript">
+      var container = document.getElementById("container");
+      function update() {
+        console.log(new Date())
+        fetch('http://127.0.0.1:8000/update/208182-lecat').then(function(response) {
+          return response.json();
+        }).then(function (data) {
+          console.log(data);
+          container.innerHTML = "";
+          for (i in data['provinces']) {
+            p = data['provinces'][i]
+            container.innerHTML += p['province_id'] + " -- " + p['prime_time'] + '<br />';
+          }
+        })
+      }
+      update()
+      setInterval(update, 60000);
+      console.log(container.innerHTML);
+      container.innerHTML += "<br/>test ok";
+    </script>
+  </body>
+</html>
