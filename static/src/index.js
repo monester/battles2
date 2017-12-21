@@ -1,10 +1,20 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
+import './bootstrap.min.css'
+import './bootstrap-theme.min.css'
+import FontAwesomeIcon from '@fortawesome/react-fontawesome'
+import { faSpinner } from '@fortawesome/fontawesome-free-solid'
+
 var moment = require('moment-timezone');
 
 
 class NavBar extends React.Component {
   render() {
+    var status;
+    if (this.props.loading) {
+      status = <FontAwesomeIcon icon={faSpinner} spin />
+    }
+
     return <nav className="navbar  navbar-defautl">
       <div className="container-fluid">
         <div className="navbar-header">
@@ -17,7 +27,7 @@ class NavBar extends React.Component {
                 value={this.props.clanTag}
               />
             </div>
-            <button className="btn btn-default" onClick={this.props.refreshHandler}>Show</button>
+            <button className="btn btn-default" onClick={this.props.refreshHandler}>Show {status}</button>
           </div>
         </div>
       </div>
@@ -32,7 +42,11 @@ class ProvinceRowCell extends React.Component {
     if(round) {
       var versus = ""
       if(round.clan_a && round.clan_b) {
-         versus = ((round.clan_a === clanTag)?round.clan_b:round.clan_a).tag
+        versus = ((round.clan_a.tag === clanTag)?round.clan_b:round.clan_a).tag
+      } else if(round.clan_a) {
+        versus = round.clan_a.tag
+      } else if(round.clan_b) {
+        versus = round.clan_b.tag
       }
       return (
         <td className="btn-default"><div className="cell">{round.title} {versus}</div></td>
@@ -43,22 +57,36 @@ class ProvinceRowCell extends React.Component {
 }
 
 class ProvinceRow extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = {
+      tags: []
+    }
+  }
+
+  componentDidMount() {
+
+  }
   render() {
     const cells = []
+    const province_id = this.props.province.province_id
+    const province_name = this.props.province.province_name
+    const prime_time = this.props.province.prime_time
+    const arena_name = this.props.province.arena_name
     this.props.times.forEach(key => {
       cells.push(
         <ProvinceRowCell
           key={this.props.province.province_id + key}
-          clan={this.props.clanTag}
+          clanTag={this.props.clanTag}
           round={this.props.province.rounds[key]} />
       )
     })
     return (
       <tr>
         <th className="headcol">
-          <a href={"https://ru.wargaming.net/globalmap/#province/" + this.props.province.province_id}>
-            {this.props.province.province_name} {this.props.province.prime_time.format("HH:mm")}</a>
-        </th>
+          <a href={"https://ru.wargaming.net/globalmap/#province/" + province_id}>
+            {province_name} {prime_time.format("HH:mm")} {arena_name}</a>
+          </th>
         <td>{this.props.province.mode}</td>
         {cells}
       </tr>
@@ -72,22 +100,26 @@ class TimeTable extends React.Component {
     this.state = {tableWidth: 0}
   }
 
-  updateDimensions = () => { this.setState({tableWidth: (document.body.clientWidth - 200) + 'px'}) }
+  updateDimensions = () => { this.setState({tableWidth: (document.body.clientWidth - 350) + 'px'}) }
   componentDidMount() { window.addEventListener("resize", this.updateDimensions); }
   componentWillMount() { this.updateDimensions(); }
   componentWillUnmount() { window.removeEventListener("resize", this.updateDimensions); }
 
   render() {
-    var times = new Set()
+    const allTimes = new Set()
     this.props.provinces.forEach(province => {
-      Object.keys(province.rounds).forEach(key => { times.add(key) })
+      Object.keys(province.rounds).forEach(key => { allTimes.add(key) })
     })
-    times = Array.from(times).sort()
 
     const timesRow = []
-    times.sort().forEach(timeStr => {
+    const times = []
+    const now = moment().subtract(900000)
+    Array.from(allTimes).sort().forEach(timeStr => {
       const time = moment(timeStr)
-      timesRow.push(<th key={"time"+time}><div className="cell">{time.format("HH:mm")}</div></th>)
+      if(! this.props.onlyActive || time > now) {
+        times.push(timeStr)
+        timesRow.push(<th key={"time"+time}><div className="cell">{time.format("HH:mm")}</div></th>)
+      }
     })
 
     const provinces = this.props.provinces.sort((a, b) => {
@@ -122,6 +154,12 @@ class TimeTable extends React.Component {
           </table>
         </div>
       )
+    } else if(this.props.loading) {
+      return (
+        <div style={{width: this.state.tableWidth, textAlign: 'center'}}>
+          <h1>Loading...</h1>
+        </div>
+      )
     } else {
       return (
         <div style={{width: this.state.tableWidth, textAlign: 'center'}}>
@@ -140,13 +178,16 @@ class App extends React.Component {
       clanTag: window.location.hash.substr(1),
       loadedClanTag: '',
       loading: false,
+      onlyActive: true,
       provinces: [],
     }
   }
 
   refreshHandler = () => {
     window.location.hash = "#" + this.state.clanTag
-    fetch('http://127.0.0.1:8000/update/' + this.state.clanTag).then(response => {
+    this.setState({loading: true})
+    // fetch data and normalize it
+    fetch('/update/' + this.state.clanTag).then(response => {
       return response.json();
     }).then(data => {
       const provinces = data.provinces
@@ -160,12 +201,20 @@ class App extends React.Component {
           }
           roundsMap[timeKey.format('YYYY-MM-DDTHH:mm:ss') + 'Z'] = round
         })
-        province.prime_time = province.rounds[0].time
+        const prime_time = province.prime_time.split(":")
+        province.prime_time = moment().hour(parseInt(prime_time[0], 10) + moment().utcOffset() / 60).minute(prime_time[1]).second(0)
         province.rounds = roundsMap
       })
       this.setState({
+        loading: false,
         loadedClanTag: this.state.clanTag,
         provinces: data.provinces,
+      })
+    }).catch(error => {
+      this.setState({
+        loading: false,
+        loadedClanTag: this.state.clanTag,
+        provinces: [],
       })
     })
   }
@@ -178,6 +227,13 @@ class App extends React.Component {
     this.refreshHandler()
   }
 
+  componentDidMount() {
+     window.addEventListener("hashchange", e => {
+      this.setState({clanTag: window.location.hash.substr(1)})
+      setTimeout(this.refreshHandler, 0)
+     });
+  }
+
   render() {
     const clanTag = this.state.clanTag
     const loadedClanTag = this.state.loadedClanTag
@@ -187,12 +243,14 @@ class App extends React.Component {
       <div>
         <NavBar
           clanTag={clanTag}
+          loading={loading}
           onClanTagChange={this.onClanTagChange}
           refreshHandler={this.refreshHandler} />
 
         <TimeTable
           clanTag={loadedClanTag}
           loading={loading}
+          onlyActive={this.state.onlyActive}
           provinces={this.state.provinces} />
       </div>
     )

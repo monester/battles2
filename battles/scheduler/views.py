@@ -58,17 +58,24 @@ class FetchClanDataView(View):
         print (provinces_id)
         today_battles = Schedule.objects.filter(
             province__province_id__in=provinces_id,
-            date=today
+            date__gte=today
         ).filter(Q(owner=clan) | Q(attackers=clan) | Q(competitors=clan))
-        provinces_data = [
-            s.get_battle_times(clan)
-            for s in set(today_battles)
-        ]
+
+        provinces_data = {}
+        for s in set(today_battles):
+            province_id = s.province.province_id
+            battles = s.get_battle_times(clan)
+            if province_id not in provinces_data:
+                provinces_data[province_id] = battles
+            else:
+                provinces_data[province_id]['rounds'] += battles['rounds']
+
+        for province_data in provinces_data.values():
+            province_data['rounds'].sort(key=lambda x: x['time'])
 
         response = JsonResponse({
             'clan': {'clan_id': clan.id, 'tag': clan.tag},
-            'date': today,
-            'provinces': provinces_data,
+            'provinces': list(provinces_data.values()),
         }, encoder=MyDjangoJSONEncoder)
         response['Access-Control-Allow-Origin'] = '*'
         return response
@@ -106,7 +113,12 @@ class FetchClanDataView(View):
             front_id=province_data['front_id'],
             province_id=province_data['province_id'],
             status = province_data['status']
+
             owner_clan_id = province_data['owner_clan_id']
+            if owner_clan_id:
+                owner = Clan.objects.get_or_create(id=province_data['owner_clan_id'])[0]
+            else:
+                owner = None
 
             # use this number only if battles have been started
             # usually if contains irrelevant data before starting battles
@@ -114,9 +126,9 @@ class FetchClanDataView(View):
 
             all_enemies = attackers + competitors
             if status == 'STARTED':
-                all_enemies += [b['clan_a']['clan_id'] for b in active_battles]
-                all_enemies += [b['clan_b']['clan_id'] for b in active_battles]
-                all_enemies = list(set(all_enemies))
+                all_enemies += [b['clan_a'] for b in active_battles]
+                all_enemies += [b['clan_b'] for b in active_battles]
+                all_enemies = list(set(all_enemies) - set([owner]))
 
             if not attackers and not competitors:
                 continue
@@ -136,31 +148,23 @@ class FetchClanDataView(View):
             )[0]
 
 
-            if owner_clan_id:
-                owner = Clan.objects.get_or_create(id=province_data['owner_clan_id'])[0]
-            else:
-                owner = None
-
             # update scheduled battle info
-            try:
-                schedule = province.schedules.get(date=battle_date)
-            except Schedule.DoesNotExist:
-                # province.schedules.update(status='FINISHED')
-                schedule = province.schedules.create(
-                    date=battle_date,
-                    round_number=round_number,
-                    battles_start_at=province_data['battles_start_at'],
-                    arena_id=province_data['arena_id'],
-                    owner=owner,
-                )
+            schedule = province.schedules.update_or_create(
+                date=battle_date,
+                arena_id=province_data['arena_id'],
+                owner=owner,
+                defaults={
+                    'round_number': round_number,
+                    'battles_start_at': province_data['battles_start_at'],
+                },
+            )[0]
             schedule.competitors.set(competitors)
             schedule.attackers.set(attackers)
 
             for battle in active_battles:
-                # print(f"{battle['start_at']}: {battle['clan_a']['clan_id']} vs {battle['clan_b']['clan_id']}")
                 schedule.battles.update_or_create(
-                    clan_a=Clan.objects.get_or_create(id=battle['clan_a']['clan_id'])[0],
-                    clan_b=Clan.objects.get_or_create(id=battle['clan_b']['clan_id'])[0],
+                    clan_a=battle['clan_a'],
+                    clan_b=battle['clan_b'],
                     round=battle['round'],
                     defaults={'start_at': battle['start_at']},
                 )

@@ -29,15 +29,13 @@ class Schedule(models.Model):
     def get_battle_times(self, clan):
         clans_count = self.attackers.count() + self.competitors.count()
         rounds = math.ceil(math.log(clans_count, 2)) + (self.round_number or 1) - 1
-
         today = datetime.combine(self.date, self.province.prime_time).replace(tzinfo=pytz.UTC)
         existing_battles = {
-            battle.round: battle
+            battle.round - 1: battle
             for battle in self.battles.all()
             if clan == battle.clan_a or clan == battle.clan_b
         }
 
-        # print(existing_battles)
         battle_times = []
         if self.owner == clan:
             mode = 'Defence'
@@ -62,9 +60,15 @@ class Schedule(models.Model):
 
         # if province is owned by some clan add one more round
         if self.owner:
+            if rounds in existing_battles:
+                clan_a = existing_battles[rounds].clan_a
+                clan_b = existing_battles[rounds].clan_b
+            else:
+                clan_a = self.owner
+                clan_b = None
             battle_times.append({
-                'clan_a': self.owner,
-                'clan_b': None,
+                'clan_a': clan_a,
+                'clan_b': clan_b,
                 'time': today + timedelta(minutes=30) * rounds,
                 'title': 'Owner',
             })
@@ -73,6 +77,7 @@ class Schedule(models.Model):
             'owner': self.owner.id if self.owner else None,
             'attackers': [c.id for c in chain(self.attackers.all(), self.competitors.all())],
             'province_id': self.province.province_id,
+            'arena_name': self.province.arena_name,
             'province_name': self.province.province_name,
             'prime_time': self.province.prime_time,
             'rounds': battle_times,

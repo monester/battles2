@@ -82,6 +82,8 @@ def get_provinces_data(clan_provinces):
 
         # convert str to datetime for active battles
         for battle in province['active_battles']:
+            battle['clan_a'] = Clan.objects.get_or_create(id=battle['clan_a']['clan_id'])[0]
+            battle['clan_b'] = Clan.objects.get_or_create(id=battle['clan_b']['clan_id'])[0]
             battle['start_at'] = convert_dt(battle['start_at'])
     return provinces
 
@@ -100,7 +102,7 @@ def get_clan_related_provinces(clan_id=208182):
     game_api_url = f'https://ru.wargaming.net/globalmap/game_api/clan/{clan_id}/battles'
     game_api_memcache = f'game_api/{clan_id}/battles'
     data = memcache.get(game_api_memcache)
-    if not data:
+    if data is None:
         try:
             data = requests.get(game_api_url)
         except RequestException as e:
@@ -108,8 +110,10 @@ def get_clan_related_provinces(clan_id=208182):
         else:
             data = data.json()
             memcache.set(game_api_memcache, data, expire=MEMCACHE_LIFETIME)
-            clan_provinces.extend(data['planned_battles'])
-            clan_provinces.extend(data['battles'])
+
+    if data:
+        clan_provinces.extend(data['planned_battles'])
+        clan_provinces.extend(data['battles'])
 
     return clan_provinces
 
