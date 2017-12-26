@@ -5,12 +5,12 @@ import './bootstrap-theme.min.css'
 import FontAwesomeIcon from '@fortawesome/react-fontawesome'
 import { faSpinner } from '@fortawesome/fontawesome-free-solid'
 
-var moment = require('moment-timezone');
+let moment = require('moment-timezone');
 
 
 class NavBar extends React.Component {
   render() {
-    var status;
+    let status;
     if (this.props.loading) {
       status = <FontAwesomeIcon icon={faSpinner} spin />
     }
@@ -28,7 +28,9 @@ class NavBar extends React.Component {
               />
             </div>
             <button className="btn btn-default" onClick={this.props.refreshHandler}>Show {status}</button>
+            <button className="btn btn-default" onClick={this.props.refreshAllHandler}>Sync all data</button>
           </div>
+          <div className="navbar-form navbar-left">{this.props.statusMessage}</div>
         </div>
       </div>
     </nav>
@@ -73,6 +75,7 @@ class ProvinceRow extends React.Component {
     const province_name = this.props.province.province_name
     const prime_time = this.props.province.prime_time
     const arena_name = this.props.province.arena_name
+    const server = this.props.province.server
     this.props.times.forEach(key => {
       cells.push(
         <ProvinceRowCell
@@ -85,7 +88,7 @@ class ProvinceRow extends React.Component {
       <tr>
         <th className="headcol">
           <a href={"https://ru.wargaming.net/globalmap/#province/" + province_id}>
-            {province_name} {prime_time.format("HH:mm")} {arena_name}</a>
+            {server} {province_name} {prime_time.format("HH:mm")} {arena_name}</a>
           </th>
         <td>{this.props.province.mode}</td>
         {cells}
@@ -113,7 +116,7 @@ class TimeTable extends React.Component {
 
     const timesRow = []
     const times = []
-    const now = moment().subtract(900000)
+    const now = moment().subtract(1800000)
     Array.from(allTimes).sort().forEach(timeStr => {
       const time = moment(timeStr)
       if(! this.props.onlyActive || time > now) {
@@ -180,14 +183,15 @@ class App extends React.Component {
       loading: false,
       onlyActive: true,
       provinces: [],
+      status: '',
     }
   }
 
-  refreshHandler = () => {
+  refreshTableHandler = () => {
     window.location.hash = "#" + this.state.clanTag
     this.setState({loading: true})
     // fetch data and normalize it
-    fetch('/update/' + this.state.clanTag).then(response => {
+    fetch('http://localhost:8000/update/' + this.state.clanTag).then(response => {
       return response.json();
     }).then(data => {
       const provinces = data.provinces
@@ -224,7 +228,7 @@ class App extends React.Component {
   }
 
   componentWillMount() {
-    this.refreshHandler()
+    this.refreshTableHandler()
   }
 
   componentDidMount() {
@@ -234,10 +238,23 @@ class App extends React.Component {
      });
   }
 
+  refreshAllHandler = () => {
+    var component = this
+    var position = 0
+    var xhr = new XMLHttpRequest()
+    xhr.open("GET", "http://localhost:8000/update_all/", true)
+    xhr.onprogress = function (e) {
+      component.setState({status: xhr.responseText.substr(position)})
+      position = e.loaded
+    }
+    xhr.send()
+  }
+
   render() {
     const clanTag = this.state.clanTag
     const loadedClanTag = this.state.loadedClanTag
     const loading = this.state.loading
+    const status = this.state.status
 
     return (
       <div>
@@ -245,7 +262,9 @@ class App extends React.Component {
           clanTag={clanTag}
           loading={loading}
           onClanTagChange={this.onClanTagChange}
-          refreshHandler={this.refreshHandler} />
+          refreshHandler={this.refreshTableHandler}
+          refreshAllHandler={this.refreshAllHandler}
+          statusMessage={status} />
 
         <TimeTable
           clanTag={loadedClanTag}
