@@ -1,54 +1,25 @@
-from unittest.mock import patch
-from itertools import zip_longest
 from datetime import datetime, time, timedelta
 import pytz
-
-import requests
 
 from django.test import TestCase
 
 from scheduler.models import Clan, Schedule, ProvinceBattles
+from scheduler.views import get_active_clan_schedules_by_date
 
 
 def create_clans(number, owner=False):
     clans = []
-    for i in range(1, number + 1):
-        clans.append(Clan.objects.create(id=i, tag=f'CLAN{i}'))
+    try:
+        first_id = Clan.objects.last().id + 1
+    except AttributeError:
+        first_id = 1
+
+    for i in range(first_id, first_id + number):
+        clans.append(Clan.objects.create(id=i, tag=f'CLN{i}'))
     if owner:
-        clans.append(Clan.objects.create(id=number + 1, tag=f'OWNER'))
+        clans.append(Clan.objects.create(id=first_id + number, tag=f'OWNER'))
     return clans
 
-# def generate_game_api_tournament_info(**kwargs):
-#     clans = kwargs.get('clans', [])
-#     battles = []
-#     for clan_a_id, clan_b_id in zip_longest(clans[::2], clans[1::2]):
-#         first_competitor = {
-#             'tag': f'tag{clan_a_id}',
-#             'id': clan_a_id
-#         }
-#         second_competitor = clan_b_id and {
-#             'tag': f'tag{clan_a_id}',
-#             'id': clan_a_id
-#         }
-#         battles.append({
-#             'first_competitor': first_competitor,
-#             'second_competitor': second_competitor,
-#             'is_fake': second_competitor is None,
-#         })
-#     owner = kwargs.get('owner', None)
-#     owner = owner and {
-#         'tag': f'tag{owner}',
-#         'id': owner
-#     }
-#     return {
-#         'owner': owner,
-#         'battles': battles,
-#         'province_id': kwargs.get('province_id', 'province_id'),
-#         'round_number': kwargs.get('round_number', 1),
-#     }
-#
-#
-# # Create your tests here.
 
 class TestBattleTimes(TestCase):
     def setUp(self):
@@ -269,9 +240,7 @@ class TestBattleTimes(TestCase):
         }]
 
 
-
-from scheduler.views import get_active_clan_schedules_by_date
-class TestSearchCorrectProvinces(TestCase):
+class TestSelectCorrectProvinces(TestCase):
     def setUp(self):
         self.clan1, self.clan2, self.clan3, self.owner = create_clans(3, owner=True)
         schedule = Schedule.objects.create(
@@ -308,6 +277,54 @@ class TestSearchCorrectProvinces(TestCase):
             clan_b=self.clan3,
             round=2,
             start_at='2017-01-01T12:00:00Z'
+        )
+
+        # Fake records in databases to create a mess:
+        # different province same day
+        clan5, clan6, clan7 = create_clans(3)
+        schedule = Schedule.objects.create(
+            front_id='front_id',
+            front_name='front',
+            province_id='province_id_2',
+            province_name='province',
+            arena_id='arena_id',
+            arena_name='arena',
+            server='server',
+            date='2017-01-01',
+            prime_time='12:00',
+            battles_start_at='2017-01-01T12:00:00Z',
+            round_number=2,
+            owner=clan5,
+        )
+        ProvinceBattles.objects.create(
+            schedule=schedule,
+            clan_a=clan5,
+            clan_b=clan6,
+            round=2,
+            start_at='2017-01-01T12:00:00Z'
+        )
+
+        # same province other day
+        schedule = Schedule.objects.create(
+            front_id='front_id',
+            front_name='front',
+            province_id='province_id',
+            province_name='province',
+            arena_id='arena_id',
+            arena_name='arena',
+            server='server',
+            date='2016-01-01',
+            prime_time='12:00',
+            battles_start_at='2016-01-01T12:00:00Z',
+            round_number=2,
+            owner=self.owner,
+        )
+        ProvinceBattles.objects.create(
+            schedule=schedule,
+            clan_a=self.clan1,
+            clan_b=self.clan2,
+            round=1,
+            start_at='2016-01-01T12:00:00Z'
         )
 
     def test_lost_on_first_round(self):

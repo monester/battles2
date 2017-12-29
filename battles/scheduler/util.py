@@ -51,8 +51,7 @@ def memcached(timeout=MEMCACHE_LIFETIME, list_field=None):
                 [repr(i) for i in args],
                 [f'{k}={v}' for k, v in kwargs.items() if k != list_field]
             )]))
-            print(key)
-            if list_field:
+            if list_field and list_field in kwargs:
                 keys = {
                     f'{key}/{sub_key}': sub_key
                     for sub_key in kwargs[list_field]
@@ -61,13 +60,15 @@ def memcached(timeout=MEMCACHE_LIFETIME, list_field=None):
                 missed_keys = keys.keys() - data.keys()
                 data = {keys[k]: v for k, v in data.items()}
                 if missed_keys:
-                    print(missed_keys)
                     kwargs[list_field] = list(keys[i] for i in missed_keys)
                     new_data = func(*args, **kwargs)
                     memcache.set_many({f'{key}/{k}': v for k, v in new_data.items()},
                                       expire=timeout)
                     data.update(new_data)
                 return data
+            elif list_field:
+                # result doesn't contains keys to get from memcache
+                return func(*args, **kwargs)
             else:
                 data = memcache.get(key)
                 if data:

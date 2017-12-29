@@ -1,15 +1,28 @@
-version: '2.2'
+version: '3.4'
 services:
   memcached:
     image: memcached
+  db:
+    image: postgres
+    environment:
+      - POSTGRES_PASSWORD=battles
+      - POSTGRES_USER=battles
+      - POSTGRES_DB=battles
   backend:
     environment:
       - WARGAMING_API
       - MEMCACHE_HOSTNAME=memcached
+      - PG_NAME=battles
+      - PG_USER=battles
+      - PG_PASSWORD=battles
+      - PG_HOST=db
     build: ./battles
-    command: ./manage.py runserver 0.0.0.0:8000
     links:
       - "memcached"
+      - "db"
+    depends_on:
+      - "memcached"
+      - "db"
   frontend:
     build: ./static
     links:

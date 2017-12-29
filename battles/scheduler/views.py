@@ -1,16 +1,13 @@
 from django.views import View
-from django.http import JsonResponse, Http404
+from django.http import JsonResponse, StreamingHttpResponse, Http404
 from django.db.models import Q
 from django.db import IntegrityError
 from django.core.serializers.json import DjangoJSONEncoder
 
 from datetime import datetime, timedelta
 
-# Create your views here.
-
-
 from .models import Clan, Schedule
-from .wgconnect import get_clan_data, normalize_provinces_data, WGClanBattles
+from .wgconnect import get_clan_data, get_clans_tags, WGClanBattles
 
 
 def get_today():
@@ -73,28 +70,28 @@ class FetchClanDataView(View):
 
         today = get_today()
 
-        # list involved provinces
-        today_schedule = get_active_clan_schedules_by_date(clan, today)
-        province_ida = {
-            (s.province.front_id, s.province.province_id)
-            for s in today_schedule
-        }
-
-        # province_ida.setdefault(s.province.front_id, []).append(s.province.province_id)
-        # update DB records for schedules and related provinces
-        self.update(clan.id, province_ida)
+        # # list involved provinces
+        # today_schedule = get_active_clan_schedules_by_date(clan, today)
+        # province_ida = {
+        #     (s.province.front_id, s.province.province_id)
+        #     for s in today_schedule
+        # }
+        #
+        # # province_ida.setdefault(s.province.front_id, []).append(s.province.province_id)
+        # # update DB records for schedules and related provinces
+        # self.update(clan.id, province_ida)
 
         predicates = [
             lambda schedule, clan: clan == schedule.owner,
-            lambda schedule, clan: clan in schedule.competitors.all(),
-            lambda schedule, clan: clan in schedule.attackers.all(),
-            lambda schedule, clan: schedule.battles.filter(round=schedule.round_number).filter(Q(clan_a=clan) | Q(clan_b=clan)),
+            lambda schedule, clan: clan in schedule.pretenders.all(),
+            lambda schedule, clan: schedule.battles.filter(
+                round=schedule.round_number).filter(Q(clan_a=clan) | Q(clan_b=clan)),
         ]
 
         today_schedule = get_active_clan_schedules_by_date(clan, today)
         provinces_data = {}
         for schedule in set(today_schedule):
-            province_id = schedule.province.province_id
+            province_id = schedule.province_id
             battles = schedule.get_battle_times(clan)
             if not battles:
                 continue
@@ -184,7 +181,7 @@ class FetchClanDataView(View):
             existing = {i.id for i in Clan.objects.filter(id__in=pretenders)}
             for clan_id in set(pretenders) - existing:
                 Clan.objects.create(id=clan_id)
-            schedule.competitors.set(pretenders)
+            schedule.pretenders.set(pretenders)
 
         for battle in active_battles:
             print(f"Create battle {battle}")
@@ -203,41 +200,32 @@ class FetchClanDataView(View):
         return [p['province_id'] for p in provinces_data]
 
 
-
-import wargaming
-from django.conf import settings
-from django.http import StreamingHttpResponse
-from itertools import count
-
-
 class UpdateAllProvinces(View):
     @staticmethod
     def list_all():
         yield 'Updating all database'
-        wot = wargaming.WoT(settings.WARGAMING_API, 'ru', 'ru')
-        wgn = wargaming.WGN(settings.WARGAMING_API, 'ru', 'ru')
         no_tags = {str(i.id): i for i in Clan.objects.filter(tag='')}
         total = len(no_tags)
         for i in range(0, total, 100):
             clans_req = list(no_tags.keys())[i:i+100]
-            for clan_id, clan_data in wgn.clans.info(clan_id=clans_req, fields='tag').items():
+            for clan_id, clan_data in get_clans_tags(clans_req):
                 no_tags[clan_id].tag = clan_data['tag']
                 no_tags[clan_id].save()
             yield 'Done %s/%s clans' % (i + 100, len(no_tags))
         yield 'Done'
 
-        fronts = wot.globalmap.fronts()
-        yield "Get %s fronts" % len(fronts)
-        for front_data in fronts:
-            front_id = front_data['front_id']
-            for page_no in count():
-                provinces = wot.globalmap.provinces(front_id=front_id, page_no=page_no + 1)
-                if len(provinces) == 0:
-                    break
-                yield f"Get %s provinces on front {front_id}" % (100 * page_no + len(provinces))
-                for province in normalize_provinces_data(provinces):
-                    FetchClanDataView.update_province(province)
-        yield "Done"
+        # fronts = wot.globalmap.fronts()
+        # yield "Get %s fronts" % len(fronts)
+        # for front_data in fronts:
+        #     front_id = front_data['front_id']
+        #     for page_no in count():
+        #         provinces = wot.globalmap.provinces(front_id=front_id, page_no=page_no + 1)
+        #         if len(provinces) == 0:
+        #             break
+        #         yield f"Get %s provinces on front {front_id}" % (100 * page_no + len(provinces))
+        #         for province in normalize_provinces_data(provinces):
+        #             FetchClanDataView.update_province(province)
+        # yield "Done"
 
     def get(self, request, *args, **kwargs):
         response = StreamingHttpResponse(self.list_all())

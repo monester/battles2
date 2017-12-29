@@ -1,7 +1,6 @@
 import copy
 from datetime import datetime, time
 import pytz
-from itertools import chain
 
 from django.conf import settings
 
@@ -37,41 +36,6 @@ def normalize_provinces_data(provinces):
 
 @log_time
 @memcached()
-def get_clan_related_provinces(clan_id=208182):
-    # --- Get clan related provinces ---
-    # get clan owned provinces from PAPI
-    clan_provinces_memcache = f'globalmap.clanprovinces.{clan_id}'
-    clan_provinces = memcache.get(clan_provinces_memcache)
-    if clan_provinces is None:
-        print (wot.globalmap.clanprovinces(clan_id=clan_id))
-        clan_provinces = wot.globalmap.clanprovinces(clan_id=clan_id)[str(clan_id)] or []
-        memcache.set(clan_provinces_memcache, clan_provinces, expire=MEMCACHE_LIFETIME)
-
-    # get clan attacks from GAME API
-    game_api_url = f'https://ru.wargaming.net/globalmap/game_api/clan/{clan_id}/battles'
-    game_api_memcache = f'game_api/{clan_id}/battles'
-    data = memcache.get(game_api_memcache)
-    if data is None:
-        try:
-            data = requests.get(game_api_url)
-        except RequestException as e:
-            data = {}
-        else:
-            data = data.json()
-            memcache.set(game_api_memcache, data, expire=MEMCACHE_LIFETIME)
-
-    if data:
-        clan_provinces.extend(data['planned_battles'])
-        clan_provinces.extend(data['battles'])
-
-    result = {}
-    for p in clan_provinces:
-        result.setdefault(p['front_id'], []).append(p['province_id'])
-    return result
-
-
-@log_time
-@memcached()
 def get_clan_data(clan_tag):
     try:
         clans = wgn.clans.list(search=clan_tag)
@@ -83,11 +47,30 @@ def get_clan_data(clan_tag):
 
 
 @log_time
+def get_clans_tags(clan_ids):
+    try:
+        return wgn.clans.info(clan_id=clan_ids, fields='tag').items()
+    except wargaming.exceptions.RequestError as e:
+        log.error(e.message)
+    return {}
+
+
+@log_time
 @memcached()
 def game_api_tournament_info(province_id):
-    return requests.get(
-        f'https://ru.wargaming.net/globalmap/game_api/tournament_info?alias={province_id}'
-    ).json()
+    tournament_info_url = f'https://ru.wargaming.net/globalmap/game_api/' \
+                          f'tournament_info?alias={province_id}'
+    try:
+        data = requests.get(tournament_info_url)
+    except RequestException as e:
+        log.error('Unable to get data from %s: %s', tournament_info_url, e)
+        data = {
+            'battles': [],
+        }
+    else:
+        # TODO: add scheme validation
+        data = data.json()
+    return data
 
 
 @log_time
@@ -96,9 +79,14 @@ def game_api_clan_battles(clan_id):
     game_api_url = f'https://ru.wargaming.net/globalmap/game_api/clan/{clan_id}/battles'
     try:
         data = requests.get(game_api_url)
-    except RequestException:
-        data = {}
+    except RequestException as e:
+        log.error('Unable to get data from %s: %s', game_api_url, e)
+        data = {
+            'battles': [],
+            'planned_battles': []
+        }
     else:
+        # TODO: add scheme validation
         data = data.json()
     return data
 
@@ -126,12 +114,13 @@ def get_battles_on_province(province_data):
 
     battles = []
     pretenders = set(province_data['competitors'] + province_data['attackers'])
+    owner_clan_id = province_data['owner_clan_id']
     clans = set()
 
     for battle in province_data['active_battles']:
         clan_a_id = battle['clan_a']['clan_id']
         clan_b_id = battle['clan_b']['clan_id']
-        clans.update(clan_a_id, clan_b_id)
+        clans.update([clan_a_id, clan_b_id])
         battles.append({
             'round': battle['round'],
             'start_at': battle['start_at'],
@@ -144,6 +133,9 @@ def get_battles_on_province(province_data):
     # []        = 1v2     => 0 >= 2 !!!
     if len(pretenders) == len(clans):
         # all clans have battles in current round
+        return battles
+    elif owner_clan_id in clans:
+        # if battle with owner, then it can be the only one round
         return battles
     elif len(pretenders) == len(clans) + 1:
         # some clan skipped it's round
@@ -229,8 +221,6 @@ class WGClanBattles:
                 province_id=provinces_ids
             )
             for province_data in data.values():
-                province_data['pretenders'] = province_data.pop('attackers') + \
-                                              province_data.pop('competitors')
                 provinces_data.append(province_data)
         self._wg_papi_provinces = provinces_data
         return provinces_data
@@ -252,6 +242,8 @@ class WGClanBattles:
         for province_data in self.wg_papi_provinces:
             battles = get_battles_on_province(province_data)
             province = copy.deepcopy(province_data)
+            province['pretenders'] = province.pop('attackers') + \
+                                     province.pop('competitors')
             province['active_battles'] = battles
             provinces.append(province)
         return normalize_provinces_data(provinces)

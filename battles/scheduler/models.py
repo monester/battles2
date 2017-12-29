@@ -76,6 +76,7 @@ class Schedule(models.Model):
 
     def get_battle_times(self, clan):
         clans_count = len(set(self.all_clans) - {self.owner})
+        print(clans_count)
 
         today = datetime.combine(self.date, self.prime_time).replace(tzinfo=pytz.UTC)
         existing_battles = {
@@ -128,10 +129,6 @@ class Schedule(models.Model):
             'mode': mode,
             'server': self.server,
         }
-
-    @classmethod
-    def get_clan_involved(cls, date, clan):
-        cls.objects.filter(Q(attackers=clan) | Q(competitors=clan) | Q(owner=clan), date=date)
 
 
 class ProvinceBattles(models.Model):

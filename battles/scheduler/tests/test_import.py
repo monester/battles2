@@ -1,206 +1,440 @@
-import requests
 from unittest.mock import patch
 from django.test import TestCase
+from datetime import datetime, time
+import pytz
 
-from scheduler.wgconnect import get_clan_related_provinces
-
-from scheduler.models import Clan, Schedule, ProvinceBattles
-from scheduler.views import FetchClanDataView
+from scheduler.wgconnect import WGClanBattles
+from scheduler.wgconnect import wot_globalmap_provinces
 
 
-class TestImport(TestCase):
+class TestWGConnectWrappers(TestCase):
     def setUp(self):
-        self.owner_clan_id = '1'
-        self.clan_provinces = {
-            self.owner_clan_id: [{
-                'front_id': 'front_id',
-                'province_id': 'province_id_1',
-            }, {
-                'front_id': 'front_id',
-                'province_id': 'province_id_2',
-            }]
-        }
+        self.memcache = patch('scheduler.util.memcache')
+        memcache = self.memcache.start()
+        memcache.get.return_value = None
+        memcache.get_many.return_value = {}
 
-        self.provinces_data = [{
-            'active_battles': [],
-            'attackers': [],
-            'competitors': [1, 2, 3, 4, 5, 6, 7],
-            'front_id': 'front1',
-            'arena_id': 'map1',
-            'arena_name': 'map1',
-            'province_id': 'province_id_3',
-            'province_name': 'province_3',
-            'prime_time': '18:15',
-            'battles_start_at': '2017-12-13T18:15:00',
-            'round_number': 6,
-            'owner_clan_id': 999,
-            'status': 'FINISHED',
-        }, {
-            'active_battles': [{
-                'clan_a': {'clan_id': 1},
-                'clan_b': {'clan_id': 2},
-                'round': 1,
-                'start_at': '2017-12-16T17:15:10',
-            }, {
-                'clan_a': {'clan_id': 3},
-                'clan_b': {'clan_id': 4},
-                'round': 1,
-                'start_at': '2017-12-16T17:15:10',
-            }, {
-                'clan_a': {'clan_id': 5},
-                'clan_b': {'clan_id': 6},
-                'round': 1,
-                'start_at': '2017-12-16T17:15:10',
-            }],
-            'attackers': [],
-            'competitors': [1, 2, 3, 4, 5, 6],
-            'battles_start_at': '2017-12-16T17:15:10',
-            'front_id': 'front1',
-            'arena_id': 'map1',
-            'arena_name': 'map1',
-            'province_id': 'province2',
-            'province_name': 'province2_name',
-            'prime_time': '17:15',
-            'round_number': 1,
-            'owner_clan_id': 999,
-            'status': 'STARTED',
-        }, {
-            'active_battles': [{
-                'clan_a': {'clan_id': 1},
-                'clan_b': {'clan_id': 2},
-                'round': 2,
-                'start_at': '2017-12-16T17:15:10',
-            }, {
-                'clan_a': {'clan_id': 3},
-                'clan_b': {'clan_id': 4},
-                'round': 2,
-                'start_at': '2017-12-16T17:15:10',
-            }, {
-                'clan_a': {'clan_id': 5},
-                'clan_b': {'clan_id': 6},
-                'round': 2,
-                'start_at': '2017-12-16T17:15:10',
-            }],
-            'attackers': [],
-            'competitors': [1, 2, 3, 4, 5, 6],
-            'battles_start_at': '2017-12-16T17:15:10',
-            'front_id': 'front1',
-            'arena_id': 'map1',
-            'arena_name': 'map1',
-            'province_id': 'province3',
-            'province_name': 'province3_name',
-            'prime_time': '17:15',
-            'round_number': 2,
-            'owner_clan_id': 999,
-            'status': 'STARTED',
-        }]
+    def tearDown(self):
+        self.memcache.stop()
 
-    @patch('scheduler.wgconnect.requests')
     @patch('scheduler.wgconnect.wot')
-    def not_started_schedule(self, wot, requests_mock):
-        requests_mock.get.side_effect = requests.exceptions.RequestException()
-        wot.globalmap.clanprovinces.return_value = self.clan_provinces
-        wot.globalmap.provinces.return_value = self.provinces_data
-        FetchClanDataView().update(clan_id='1')
-        assert Province.objects.count() == 3
-        assert Schedule.objects.count() == 3
-        # assert Clan.objects.count() == 3
-        province = Province.objects.get(province_id='province2')
-        assert Schedule.objects.get(date='2017-12-16', province=province).battles.count() == 3
-
-
-    def get_info_missing_end(self):
-        # update  -> s attackers: clan, battles_starts_at: today
-        # no update
-        # next update -> attackers: [], battles_starts_at: tomorrow
-        from .wgconnect import normalize_provinces_data
-        first_fetch = {
-            'active_battles': [],
-            'attackers': [],
-            'competitors': [1, 2, 3, 4, 5, 6, 7],
-            'front_id': 'front1',
-            'arena_id': 'map1',
-            'arena_name': 'map1',
-            'province_id': 'province1',
-            'province_name': 'province1_name',
-            'prime_time': '18:15',
-            'battles_start_at': '2017-12-13T18:15:00',
-            'round_number': 6,
-            'owner_clan_id': 999,
-            'status': 'FINISHED',
-        }
-        FetchClanDataView.update_province(normalize_provinces_data([first_fetch])[0])
-        s = Schedule.objects.get(province__province_id='province1', date='2017-12-13')
-        print(s.status)
-        print(s.competitors.all())
-        assert 1 == 0
-
-        last_fetch = {
-            'active_battles': [],
-            'attackers': [],
-            'competitors': [],
-            'front_id': 'front1',
-            'arena_id': 'map1',
-            'arena_name': 'map1',
-            'province_id': 'province1',
-            'province_name': 'province1_name',
-            'prime_time': '18:15',
-            'battles_start_at': '2017-12-14T18:15:00',
-            'round_number': 6,
-            'owner_clan_id': 999,
-            'status': 'FINISHED',
-        }
-
-
-class TestGetProvincesData(TestCase):
-    @patch("scheduler.wgconnect.memcache")
-    @patch('scheduler.wgconnect.wot')
-    def test_get_all_from_memcache(self, wot, memcache):
+    def test_wot_globalmap_provinces(self, wot):
         province_data = {
             'active_battles': [],
             'attackers': [],
             'competitors': [1, 2, 3, 4, 5, 6, 7],
             'front_id': 'front_id',
-            'arena_id': 'map1',
-            'arena_name': 'map1',
+            'arena_id': 'arena_id',
+            'arena_name': 'arena',
             'province_id': 'province_id',
-            'province_name': 'province1_name',
+            'province_name': 'province',
             'prime_time': '18:15',
             'battles_start_at': '2017-12-13T18:15:00',
             'round_number': 6,
             'owner_clan_id': 999,
             'status': 'FINISHED',
         }
-        memcache.get_many.return_value = {
-            'front_id/province_id': province_data
+        wot.globalmap.provinces.return_value = [province_data]
+        assert wot_globalmap_provinces(front_id='fake', province_id=['fake']) == {
+            'province_id': province_data
         }
-        # get_provinces_data({'front_id': ['province_id']})
 
 
+class TestWGClanBattles(TestCase):
+    def setUp(self):
+        self.not_started_provinces = {
+            'province_id': {
+                'active_battles': [],
+                'attackers': [],
+                'competitors': [1, 2, 3, 4, 5, 6, 7],
+                'front_id': 'front_id',
+                'arena_id': 'arena_id',
+                'arena_name': 'arena',
+                'province_id': 'province_id',
+                'province_name': 'province',
+                'prime_time': '18:15',
+                'battles_start_at': '2017-12-13T18:15:00',
+                'round_number': 6,
+                'owner_clan_id': 999,
+                'status': 'FINISHED',
+            }
+        }
 
-class TestGetClanRelatedProvinces(TestCase):
-    @patch('scheduler.wgconnect.memcache')
-    @patch('scheduler.wgconnect.requests')
-    @patch('scheduler.wgconnect.wot')
-    def test_get_all_related_from_game_api(self, wot, requests, memcache):
-        memcache.get.return_value = None
-        memcache.get_many.return_value = None
+    @patch('scheduler.wgconnect.wot_globalmap_provinces')
+    @patch('scheduler.wgconnect.game_api_clan_battles')
+    @patch('scheduler.wgconnect.wot_globalmap_clanprovinces')
+    def test_owned_province_not_started(self,
+                                        wot_globalmap_clanprovinces,
+                                        game_api_clan_battles,
+                                        wot_globalmap_provinces):
+        wot_globalmap_clanprovinces.return_value = {
+            '1': [{
+                'front_id': 'front_id',
+                'province_id': 'province_id',
+            }]
+        }
+        game_api_clan_battles.return_value = {
+            'battles': [],
+            'planned_battles': [],
+        }
+        wot_globalmap_provinces.return_value = self.not_started_provinces
+        assert WGClanBattles(1).get_clan_related_provinces() == [{
+            'active_battles': [],
+            'pretenders': [1, 2, 3, 4, 5, 6, 7],
+            'front_id': 'front_id',
+            'arena_id': 'arena_id',
+            'arena_name': 'arena',
+            'province_id': 'province_id',
+            'province_name': 'province',
+            'prime_time': time(18, 15),
+            'battles_start_at': datetime(2017, 12, 13, 18, 15, 0, tzinfo=pytz.UTC),
+            'round_number': 6,
+            'owner_clan_id': 999,
+            'status': 'FINISHED',
+        }]
 
-        # https://ru.wargaming.net/globalmap/game_api/clan/{clan_id}/battles
-        requests.get.return_value.json.return_value = {
-           'battles': [{
+    @patch('scheduler.wgconnect.wot_globalmap_provinces')
+    @patch('scheduler.wgconnect.game_api_clan_battles')
+    @patch('scheduler.wgconnect.wot_globalmap_clanprovinces')
+    def test_planned_province_not_started(
+            self,
+            wot_globalmap_clanprovinces,
+            game_api_clan_battles,
+            wot_globalmap_provinces
+    ):
+        wot_globalmap_clanprovinces.return_value = {
+            '1': None
+        }
+        game_api_clan_battles.return_value = {
+            'battles': [],
+            'planned_battles': [{
+                'front_id': 'front_id',
+                'province_id': 'province_id',
+            }],
+        }
+        wot_globalmap_provinces.return_value = self.not_started_provinces
+        assert WGClanBattles(1).get_clan_related_provinces() == [{
+            'active_battles': [],
+            'pretenders': [1, 2, 3, 4, 5, 6, 7],
+            'front_id': 'front_id',
+            'arena_id': 'arena_id',
+            'arena_name': 'arena',
+            'province_id': 'province_id',
+            'province_name': 'province',
+            'prime_time': time(18, 15),
+            'battles_start_at': datetime(2017, 12, 13, 18, 15, 0, tzinfo=pytz.UTC),
+            'round_number': 6,
+            'owner_clan_id': 999,
+            'status': 'FINISHED',
+        }]
+
+    @patch('scheduler.wgconnect.wot_globalmap_provinces')
+    @patch('scheduler.wgconnect.game_api_clan_battles')
+    @patch('scheduler.wgconnect.wot_globalmap_clanprovinces')
+    def test_planned_province_started_with_pretenders_province_round_1(
+            self,
+            wot_globalmap_clanprovinces,
+            game_api_clan_battles,
+            wot_globalmap_provinces
+    ):
+        wot_globalmap_clanprovinces.return_value = {
+            '1': None
+        }
+        game_api_clan_battles.return_value = {
+            'battles': [{
                 'front_id': 'front_id',
                 'province_id': 'province_id',
             }],
             'planned_battles': [],
         }
-        wot.globalmap.clanprovinces.return_value = {'1': None}
-        wot.globalmap.clanbattles = []
-
-        assert get_clan_related_provinces(1) == {
-            'front_id': ['province_id']
+        wot_globalmap_provinces.return_value = {
+            'province_id': {
+                'active_battles': [{
+                    'start_at': '2017-12-13T18:15:00',
+                    'clan_a': {'clan_id': 1},
+                    'clan_b': {'clan_id': 2},
+                    'round': 1,
+                }, {
+                    'start_at': '2017-12-13T18:15:00',
+                    'clan_a': {'clan_id': 3},
+                    'clan_b': {'clan_id': 4},
+                    'round': 1,
+                }, {
+                    'start_at': '2017-12-13T18:15:00',
+                    'clan_a': {'clan_id': 5},
+                    'clan_b': {'clan_id': 6},
+                    'round': 1,
+                }],
+                'attackers': [],
+                'competitors': [1, 2, 3, 4, 5, 6],
+                'front_id': 'front_id',
+                'arena_id': 'arena_id',
+                'arena_name': 'arena',
+                'province_id': 'province_id',
+                'province_name': 'province',
+                'prime_time': '18:15',
+                'battles_start_at': '2017-12-13T18:15:00',
+                'round_number': 1,
+                'owner_clan_id': 999,
+                'status': 'STARTED',
+            }
         }
+        assert WGClanBattles(1).get_clan_related_provinces()[0]['active_battles'] == [{
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 1},
+            'clan_b': {'clan_id': 2},
+            'round': 1,
+        }, {
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 3},
+            'clan_b': {'clan_id': 4},
+            'round': 1,
+        }, {
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 5},
+            'clan_b': {'clan_id': 6},
+            'round': 1,
+        }]
 
-    # def test_get_all_related_from_game_api(self, wot, requests, memcache):
+    @patch('scheduler.wgconnect.wot_globalmap_provinces')
+    @patch('scheduler.wgconnect.game_api_clan_battles')
+    @patch('scheduler.wgconnect.wot_globalmap_clanprovinces')
+    def test_planned_province_started_with_pretenders_no_opponent_province_round_1(
+            self,
+            wot_globalmap_clanprovinces,
+            game_api_clan_battles,
+            wot_globalmap_provinces
+    ):
+        wot_globalmap_clanprovinces.return_value = {
+            '1': None
+        }
+        game_api_clan_battles.return_value = {
+            'battles': [{
+                'front_id': 'front_id',
+                'province_id': 'province_id',
+            }],
+            'planned_battles': [],
+        }
+        wot_globalmap_provinces.return_value = {
+            'province_id': {
+                'active_battles': [{
+                    'start_at': '2017-12-13T18:15:00',
+                    'clan_a': {'clan_id': 1},
+                    'clan_b': {'clan_id': 2},
+                    'round': 1,
+                }, {
+                    'start_at': '2017-12-13T18:15:00',
+                    'clan_a': {'clan_id': 3},
+                    'clan_b': {'clan_id': 4},
+                    'round': 1,
+                }],
+                'attackers': [],
+                'competitors': [1, 2, 3, 4, 5],
+                'front_id': 'front_id',
+                'arena_id': 'arena_id',
+                'arena_name': 'arena',
+                'province_id': 'province_id',
+                'province_name': 'province',
+                'prime_time': '18:15',
+                'battles_start_at': '2017-12-13T18:15:00',
+                'round_number': 1,
+                'owner_clan_id': 999,
+                'status': 'STARTED',
+            }
+        }
+        assert WGClanBattles(1).get_clan_related_provinces()[0]['active_battles'] == [{
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 1},
+            'clan_b': {'clan_id': 2},
+            'round': 1,
+        }, {
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 3},
+            'clan_b': {'clan_id': 4},
+            'round': 1,
+        }, {
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 5},
+            'clan_b': {'clan_id': None},
+            'round': 1,
+        }]
 
+    @patch('scheduler.wgconnect.wot_globalmap_provinces')
+    @patch('scheduler.wgconnect.game_api_clan_battles')
+    @patch('scheduler.wgconnect.wot_globalmap_clanprovinces')
+    @patch('scheduler.wgconnect.game_api_tournament_info')
+    def test_planned_province_started_no_pretenders_round_1(
+            self,
+            game_api_tournament_info,
+            wot_globalmap_clanprovinces,
+            game_api_clan_battles,
+            wot_globalmap_provinces
+    ):
+        wot_globalmap_clanprovinces.return_value = {
+            '1': None
+        }
+        game_api_clan_battles.return_value = {
+            'battles': [{
+                'front_id': 'front_id',
+                'province_id': 'province_id',
+            }],
+            'planned_battles': [],
+        }
+        wot_globalmap_provinces.return_value = {
+            'province_id': {
+                'active_battles': [{
+                    'start_at': '2017-12-13T18:15:00',
+                    'clan_a': {'clan_id': 1},
+                    'clan_b': {'clan_id': 2},
+                    'round': 1,
+                }, {
+                    'start_at': '2017-12-13T18:15:00',
+                    'clan_a': {'clan_id': 3},
+                    'clan_b': {'clan_id': 4},
+                    'round': 1,
+                }],
+                'attackers': [],
+                'competitors': [],
+                'front_id': 'front_id',
+                'arena_id': 'arena_id',
+                'arena_name': 'arena',
+                'province_id': 'province_id',
+                'province_name': 'province',
+                'prime_time': '18:15',
+                'battles_start_at': '2017-12-13T18:15:00',
+                'round_number': 1,
+                'owner_clan_id': 999,
+                'status': 'STARTED',
+            }
+        }
+        game_api_tournament_info.return_value = {
+            'round_number': 1,
+            'battles': [{
+                'first_competitor': {'id': 1},
+                'second_competitor': {'id': 2},
+            }, {
+                'first_competitor': {'id': 3},
+                'second_competitor': {'id': 4},
+            },{
+                'first_competitor': {'id': 5},
+                'second_competitor': None,
+            }]
+        }
+        assert WGClanBattles(1).get_clan_related_provinces()[0]['active_battles'] == [{
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 1},
+            'clan_b': {'clan_id': 2},
+            'round': 1,
+        }, {
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 3},
+            'clan_b': {'clan_id': 4},
+            'round': 1,
+        }, {
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 5},
+            'clan_b': {'clan_id': None},
+            'round': 1,
+        }]
 
+    @patch('scheduler.wgconnect.wot_globalmap_provinces')
+    @patch('scheduler.wgconnect.game_api_clan_battles')
+    @patch('scheduler.wgconnect.wot_globalmap_clanprovinces')
+    @patch('scheduler.wgconnect.game_api_tournament_info')
+    def test_planned_province_started_no_pretenders_round_owner(
+            self,
+            game_api_tournament_info,
+            wot_globalmap_clanprovinces,
+            game_api_clan_battles,
+            wot_globalmap_provinces
+    ):
+        wot_globalmap_clanprovinces.return_value = {
+            '1': None
+        }
+        game_api_clan_battles.return_value = {
+            'battles': [{
+                'front_id': 'front_id',
+                'province_id': 'province_id',
+            }],
+            'planned_battles': [],
+        }
+        wot_globalmap_provinces.return_value = {
+            'province_id': {
+                'active_battles': [{
+                    'start_at': '2017-12-13T18:15:00',
+                    'clan_a': {'clan_id': 1},
+                    'clan_b': {'clan_id': 2},
+                    'round': 1,
+                }],
+                'attackers': [],
+                'competitors': [],
+                'front_id': 'front_id',
+                'arena_id': 'arena_id',
+                'arena_name': 'arena',
+                'province_id': 'province_id',
+                'province_name': 'province',
+                'prime_time': '18:15',
+                'battles_start_at': '2017-12-13T18:15:00',
+                'round_number': 1,
+                'owner_clan_id': 2,
+                'status': 'STARTED',
+            }
+        }
+        game_api_tournament_info.side_effect = Exception("Should not be run")
+        assert WGClanBattles(1).get_clan_related_provinces()[0]['active_battles'] == [{
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 1},
+            'clan_b': {'clan_id': 2},
+            'round': 1,
+        }]
+
+    @patch('scheduler.wgconnect.wot_globalmap_provinces')
+    @patch('scheduler.wgconnect.game_api_clan_battles')
+    @patch('scheduler.wgconnect.wot_globalmap_clanprovinces')
+    @patch('scheduler.wgconnect.game_api_tournament_info')
+    def test_planned_province_started_with_pretenders_round_owner(
+            self,
+            game_api_tournament_info,
+            wot_globalmap_clanprovinces,
+            game_api_clan_battles,
+            wot_globalmap_provinces
+    ):
+        wot_globalmap_clanprovinces.return_value = {
+            '1': None
+        }
+        game_api_clan_battles.return_value = {
+            'battles': [{
+                'front_id': 'front_id',
+                'province_id': 'province_id',
+            }],
+            'planned_battles': [],
+        }
+        wot_globalmap_provinces.return_value = {
+            'province_id': {
+                'active_battles': [{
+                    'start_at': '2017-12-13T18:15:00',
+                    'clan_a': {'clan_id': 1},
+                    'clan_b': {'clan_id': 2},
+                    'round': 1,
+                }],
+                'attackers': [1],
+                'competitors': [],
+                'front_id': 'front_id',
+                'arena_id': 'arena_id',
+                'arena_name': 'arena',
+                'province_id': 'province_id',
+                'province_name': 'province',
+                'prime_time': '18:15',
+                'battles_start_at': '2017-12-13T18:15:00',
+                'round_number': 1,
+                'owner_clan_id': 2,
+                'status': 'STARTED',
+            }
+        }
+        game_api_tournament_info.side_effect = Exception("Should not be run")
+        assert WGClanBattles(1).get_clan_related_provinces()[0]['active_battles'] == [{
+            'start_at': datetime(2017, 12, 13, 18, 15, tzinfo=pytz.UTC),
+            'clan_a': {'clan_id': 1},
+            'clan_b': {'clan_id': 2},
+            'round': 1,
+        }]

@@ -42,7 +42,7 @@ class ProvinceRowCell extends React.Component {
     const round = this.props.round;
     const clanTag = this.props.clanTag;
     if(round) {
-      var versus = ""
+      let versus = "";
       if(round.clan_a && round.clan_b) {
         versus = ((round.clan_a.tag === clanTag)?round.clan_b:round.clan_a).tag
       } else if(round.clan_a) {
@@ -54,13 +54,13 @@ class ProvinceRowCell extends React.Component {
         <td className="btn-default"><div className="cell">{round.title} {versus}</div></td>
       )
     }
-    return <td><div className="cell"></div></td>
+    return <td><div className="cell" /></td>
   }
 }
 
 class ProvinceRow extends React.Component {
   constructor(props) {
-    super(props)
+    super(props);
     this.state = {
       tags: []
     }
@@ -70,12 +70,12 @@ class ProvinceRow extends React.Component {
 
   }
   render() {
-    const cells = []
-    const province_id = this.props.province.province_id
-    const province_name = this.props.province.province_name
-    const prime_time = this.props.province.prime_time
-    const arena_name = this.props.province.arena_name
-    const server = this.props.province.server
+    const cells = [];
+    const province_id = this.props.province.province_id;
+    const province_name = this.props.province.province_name;
+    const prime_time = this.props.province.prime_time;
+    const arena_name = this.props.province.arena_name;
+    const server = this.props.province.server;
     this.props.times.forEach(key => {
       cells.push(
         <ProvinceRowCell
@@ -83,7 +83,7 @@ class ProvinceRow extends React.Component {
           clanTag={this.props.clanTag}
           round={this.props.province.rounds[key]} />
       )
-    })
+    });
     return (
       <tr>
         <th className="headcol">
@@ -103,37 +103,37 @@ class TimeTable extends React.Component {
     this.state = {tableWidth: 0}
   }
 
-  updateDimensions = () => { this.setState({tableWidth: (document.body.clientWidth - 350) + 'px'}) }
+  updateDimensions = () => { this.setState({tableWidth: (document.body.clientWidth - 350) + 'px'}) };
   componentDidMount() { window.addEventListener("resize", this.updateDimensions); }
   componentWillMount() { this.updateDimensions(); }
   componentWillUnmount() { window.removeEventListener("resize", this.updateDimensions); }
 
   render() {
-    const allTimes = new Set()
+    const allTimes = new Set();
     this.props.provinces.forEach(province => {
       Object.keys(province.rounds).forEach(key => { allTimes.add(key) })
-    })
+    });
 
-    const timesRow = []
-    const times = []
-    const now = moment().subtract(1800000)
+    const timesRow = [];
+    const times = [];
+    const now = moment().subtract(1800000);
     Array.from(allTimes).sort().forEach(timeStr => {
-      const time = moment(timeStr)
+      const time = moment(timeStr);
       if(! this.props.onlyActive || time > now) {
-        times.push(timeStr)
+        times.push(timeStr);
         timesRow.push(<th key={"time"+time}><div className="cell">{time.format("HH:mm")}</div></th>)
       }
-    })
+    });
 
     const provinces = this.props.provinces.sort((a, b) => {
-      var key_a =  [
+      let key_a =  [
         [15, 45].includes(a.prime_time.minutes()),
         - a.prime_time.toDate()
-      ]
-      var key_b =  [
+      ];
+      let key_b =  [
         [15, 45].includes(b.prime_time.minutes()),
         - b.prime_time.toDate()
-      ]
+      ];
       return (key_a > key_b)?1:-1
     }).map(province =>{
       return <ProvinceRow
@@ -141,7 +141,7 @@ class TimeTable extends React.Component {
         province={province}
         times={times}
         clanTag={this.props.clanTag} />
-    })
+    });
     if (this.props.clanTag !== '') {
       return (
         <div className="timetable" style={{width: this.state.tableWidth}}>
@@ -176,7 +176,7 @@ class TimeTable extends React.Component {
 
 class App extends React.Component {
   constructor(props) {
-    super(props)
+    super(props);
     this.state = {
       clanTag: window.location.hash.substr(1),
       loadedClanTag: '',
@@ -188,44 +188,44 @@ class App extends React.Component {
   }
 
   refreshTableHandler = () => {
-    window.location.hash = "#" + this.state.clanTag
-    this.setState({loading: true})
+    window.location.hash = "#" + this.state.clanTag;
+    this.setState({loading: true});
     // fetch data and normalize it
     fetch('http://localhost:8000/update/' + this.state.clanTag).then(response => {
       return response.json();
     }).then(data => {
-      const provinces = data.provinces
+      const provinces = data.provinces;
       provinces.forEach(province => {
-        const roundsMap = new Map()
+        const roundsMap = new Map();
         province.rounds.forEach(round => {
-          round.time = moment(round.time)
-          const timeKey = round.time.clone().tz('UTC')
+          round.time = moment(round.time);
+          const timeKey = round.time.clone().tz('UTC');
           if([15, 45].includes(round.time.minutes())) {
             timeKey.subtract(900000)
           }
           roundsMap[timeKey.format('YYYY-MM-DDTHH:mm:ss') + 'Z'] = round
-        })
-        const prime_time = province.prime_time.split(":")
-        province.prime_time = moment().hour(parseInt(prime_time[0], 10) + moment().utcOffset() / 60).minute(prime_time[1]).second(0)
+        });
+        const prime_time = province.prime_time.split(":");
+        province.prime_time = moment().hour(parseInt(prime_time[0], 10) + moment().utcOffset() / 60).minute(prime_time[1]).second(0);
         province.rounds = roundsMap
-      })
+      });
       this.setState({
         loading: false,
         loadedClanTag: this.state.clanTag,
         provinces: data.provinces,
       })
-    }).catch(error => {
+    }).catch(() => {
       this.setState({
         loading: false,
         loadedClanTag: this.state.clanTag,
         provinces: [],
       })
     })
-  }
+  };
 
   onClanTagChange = (clanTag) => {
     this.setState({clanTag: clanTag.toUpperCase()})
-  }
+  };
 
   componentWillMount() {
     this.refreshTableHandler()
@@ -233,28 +233,28 @@ class App extends React.Component {
 
   componentDidMount() {
      window.addEventListener("hashchange", e => {
-      this.setState({clanTag: window.location.hash.substr(1)})
+      this.setState({clanTag: window.location.hash.substr(1)});
       setTimeout(this.refreshHandler, 0)
      });
   }
 
   refreshAllHandler = () => {
-    var component = this
-    var position = 0
-    var xhr = new XMLHttpRequest()
-    xhr.open("GET", "http://localhost:8000/update_all/", true)
+    let component = this;
+    let position = 0;
+    let xhr = new XMLHttpRequest();
+    xhr.open("GET", "http://localhost:8000/update_all/", true);
     xhr.onprogress = function (e) {
-      component.setState({status: xhr.responseText.substr(position)})
+      component.setState({status: xhr.responseText.substr(position)});
       position = e.loaded
-    }
+    };
     xhr.send()
-  }
+  };
 
   render() {
-    const clanTag = this.state.clanTag
-    const loadedClanTag = this.state.loadedClanTag
-    const loading = this.state.loading
-    const status = this.state.status
+    const clanTag = this.state.clanTag;
+    const loadedClanTag = this.state.loadedClanTag;
+    const loading = this.state.loading;
+    const status = this.state.status;
 
     return (
       <div>
