@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # Create your views here.
 
 
-from .models import Clan, Schedule, Province
+from .models import Clan, Schedule
 from .wgconnect import get_clan_data, normalize_provinces_data, WGClanBattles
 
 
@@ -34,25 +34,27 @@ class MyDjangoJSONEncoder(DjangoJSONEncoder):
 
 
 def get_active_clan_schedules_by_date(clan, date):
-    schedules = Schedule.objects.select_related('province'). \
-        prefetch_related('competitors').prefetch_related('attackers').filter(
+    schedules = Schedule.objects. \
+        prefetch_related('pretenders').filter(
             date__gte=date). \
         exclude(status='FINISHED'). \
         filter(
             Q(owner=clan) |
-            Q(attackers=clan) |
-            Q(competitors=clan) |
+            Q(pretenders=clan) |
             Q(battles__clan_a=clan) |
             Q(battles__clan_b=clan)
         )
+
     result = []
     for schedule in schedules:
         if schedule.round_number is None:
             result.append(schedule)
+        elif schedule.owner == clan:
+            result.append(schedule)
         elif any((clan == i.clan_a or clan == i.clan_b)
                  for i in schedule.battles.filter(round=schedule.round_number)):
             result.append(schedule)
-    return result
+    return list(set(result))
 
 
 class FetchClanDataView(View):
@@ -136,8 +138,7 @@ class FetchClanDataView(View):
 
     @staticmethod
     def update_province(province_data):
-        attackers = province_data['attackers']
-        competitors = province_data['competitors']
+        pretenders = province_data['pretenders']
         active_battles = province_data['active_battles']
         battles_start_at = province_data['battles_start_at']
         battle_date = get_battle_date(battles_start_at)
@@ -155,33 +156,20 @@ class FetchClanDataView(View):
         # usually if contains irrelevant data before starting battles
         round_number = province_data['round_number'] if status == "STARTED" else None
 
-        all_enemies = attackers + competitors
-        if status == 'STARTED':
-            all_enemies += [b['clan_a']['clan_id'] for b in active_battles]
-            all_enemies += [b['clan_b']['clan_id'] for b in active_battles]
-            all_enemies = list(set(all_enemies) - {owner_clan_id})
-
-        if not all_enemies:
+        if not pretenders:
             return
 
-        # get province
-        province = Province.objects.get_or_create(
+        # update scheduled battle info
+        schedule = Schedule.objects.update_or_create(
             front_id=province_data['front_id'],
             province_id=province_data['province_id'],
+            date=battle_date,
             defaults={
                 'province_name': province_data['province_name'],
+                'server': province_data['server'],
                 'arena_id': province_data['arena_id'],
                 'arena_name': province_data['arena_name'],
                 'prime_time': province_data['prime_time'],
-            },
-        )[0]
-
-        # update scheduled battle info
-        schedule = province.schedules.update_or_create(
-            date=battle_date,
-            defaults={
-                'server': province_data['server'],
-                'arena_id': province_data['arena_id'],
                 'owner': owner,
                 'round_number': round_number,
                 'battles_start_at': province_data['battles_start_at'],
@@ -191,20 +179,12 @@ class FetchClanDataView(View):
         print(f"Created schedule {schedule}")
 
         try:
-            schedule.competitors.set(competitors)
+            schedule.pretenders.set(pretenders)
         except IntegrityError:
-            existing = {i.id for i in Clan.objects.filter(id__in=competitors)}
-            for clan_id in set(competitors) - existing:
+            existing = {i.id for i in Clan.objects.filter(id__in=pretenders)}
+            for clan_id in set(pretenders) - existing:
                 Clan.objects.create(id=clan_id)
-            schedule.competitors.set(competitors)
-
-        try:
-            schedule.attackers.set(attackers)
-        except IntegrityError:
-            existing = {i.id for i in Clan.objects.filter(id__in=attackers)}
-            for clan_id in set(attackers) - existing:
-                Clan.objects.create(id=clan_id)
-            schedule.attackers.set(attackers)
+            schedule.competitors.set(pretenders)
 
         for battle in active_battles:
             print(f"Create battle {battle}")
@@ -216,7 +196,7 @@ class FetchClanDataView(View):
             )
 
     def update(self, clan_id, provinces_ids):
-        provinces_data = WGClanBattles(clan_id, provinces_ids).get_clan_battles()
+        provinces_data = WGClanBattles(clan_id, provinces_ids).get_clan_related_provinces()
         # --- Update provinces data in DB ---
         for province_data in provinces_data:
             self.update_province(province_data)

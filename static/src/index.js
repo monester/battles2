@@ -224,7 +224,7 @@ class App extends React.Component {
   }
 
   onClanTagChange = (clanTag) => {
-    this.setState({clanTag: clanTag})
+    this.setState({clanTag: clanTag.toUpperCase()})
   }
 
   componentWillMount() {
