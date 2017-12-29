@@ -73,10 +73,13 @@ def get_clan_related_provinces(clan_id=208182):
 @log_time
 @memcached()
 def get_clan_data(clan_tag):
-    clans = wgn.clans.list(search=clan_tag)
-    for i in clans:
-        if i['tag'] == clan_tag:
-            return i
+    try:
+        clans = wgn.clans.list(search=clan_tag)
+        for i in clans:
+            if i['tag'] == clan_tag:
+                return i
+    except wargaming.exceptions.RequestError as e:
+        log.error("Unable to find clan %s: %s", clan_tag, e.message)
 
 
 @log_time

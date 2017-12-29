@@ -12,11 +12,7 @@ services:
       - "memcached"
   frontend:
     build: ./static
-    command: serve -s /src/build
-  balancer:
-    build: ./nginx
     links:
       - "backend"
-      - "frontend"
     ports:
       - "8000:80"
