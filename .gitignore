@@ -3,5 +3,4 @@ venv
 db.sqlite3
 .cache
 .idea
-*.json
 battles/battles/sqlmiddleware.py

@@ -149,26 +149,52 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--prime')
         parser.add_argument('--clans', type=int, default=3)
-        parser.add_argument('--create-rounds')
         parser.add_argument('--owner')
+        parser.add_argument('--province')
+        parser.add_argument('--status', default='FINISHED')
+        parser.add_argument('--round', type=int, default=None)
 
     def handle(self, *args, **options):
         clans = Clan.objects.all()[0:options['clans']]
 
-        province_data = provinces_data[random.randint(0, len(provinces_data) - 1)]
+        if options['province']:
+            province_data = [i for i in provinces_data
+                             if i['province_id'] == options['province']][0]
+        else:
+            province_data = provinces_data[random.randint(0, len(provinces_data) - 1)]
         province_id = province_data.pop('province_id')
         now = datetime.now(tz=pytz.UTC).replace(microsecond=0)
         today = (now - timedelta(hours=9)).date()
         battles_start_at = now.replace(minute=0, second=0) + timedelta(hours=1)
         province_data['battles_start_at'] = battles_start_at
-        province_data['prime_time'] = options['prime'] or battles_start_at.time()
-        province_data['round_number'] = None
-        province_data['status'] = None
-        province_data['owner'] = options['owner'] and Clan.objects.get(tag=options['owner'])
-        print(today)
-        print(province_data)
+        province_data['prime_time'] = prime_time = options['prime'] or battles_start_at.time()
+        province_data['round_number'] = options['round']
+        province_data['status'] = status = options['status'] if options['status'] != 'None' else None
+        province_data['owner'] = owner = options['owner'] and Clan.objects.get(tag=options['owner'])
+
+        print(f'./manage.py fake '
+              f'--clans {len(clans)} '
+              f'--province {province_id} '
+              f'--prime-time {prime_time} '
+              f'--owner {owner} '
+              f'--status {status}')
 
         s = Schedule.objects.update_or_create(province_id=province_id, date=today,
                                               defaults=province_data)[0]
-        s.pretenders.set(clans)
-        print([i.tag for i in clans])
+
+        if status == 'FINISHED' or status is None:
+            s.pretenders.set(clans)
+        else:
+            round_number = options['round']
+            from itertools import zip_longest
+            s.battles.filter(round=round_number).delete()
+            for clan_a, clan_b in zip_longest(clans[::2], clans[1::2]):
+                s.battles.create(
+                    clan_a=clan_a,
+                    clan_b=clan_b,
+                    round=round_number,
+                    start_at=s.battles_start_at,
+                )
+                clan_a_tag = clan_a.tag
+                clan_b_tag = clan_b and clan_b.tag
+                print(f"ROUND {round_number}: {clan_a_tag} vs {clan_b_tag} on {s.province_id}")
