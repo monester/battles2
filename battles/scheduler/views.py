@@ -3,6 +3,7 @@ from django.http import JsonResponse, StreamingHttpResponse, Http404
 from django.db.models import Q
 from django.db import IntegrityError
 from django.core.serializers.json import DjangoJSONEncoder
+from django.conf import settings
 
 from datetime import datetime, timedelta
 
@@ -12,8 +13,7 @@ from .wgconnect import get_clan_data, get_clans_tags, WGClanBattles
 
 def get_today():
     dt = datetime.now()
-    # MSK Prime_time  starts at 9 AM UTC
-    if dt.hour < 9:
+    if dt.hour < settings.PRIME_STARTS_AT_HOUR:
         dt = dt - timedelta(days=1)
     return dt.date()
 

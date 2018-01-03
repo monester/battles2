@@ -73,3 +73,6 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = f'{BASE_DIR}/static'
 WARGAMING_API = os.environ.get('WARGAMING_API', 'demo')
+
+# MSK Prime_time  starts at 9 AM UTC
+PRIME_STARTS_AT_HOUR = 9

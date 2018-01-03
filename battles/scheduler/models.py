@@ -1,10 +1,10 @@
 import pytz
 import math
-from itertools import chain
-from datetime import date, time, datetime, timedelta
+from datetime import datetime, timedelta
 
 from django.db import models
 from django.db.models import Q
+from django.conf import settings
 
 
 def get_rounds_titles(clans_count, current_round, owner=None):
@@ -79,6 +79,8 @@ class Schedule(models.Model):
         print(clans_count)
 
         today = datetime.combine(self.date, self.prime_time).replace(tzinfo=pytz.UTC)
+        if self.prime_time.hour < settings.PRIME_STARTS_AT_HOUR:
+            today += timedelta(days=1)
         existing_battles = {
             battle.round - 1: battle
             for battle in self.battles.filter(Q(clan_a=clan) | Q(clan_b=clan))
@@ -140,7 +142,10 @@ class ProvinceBattles(models.Model):
 
     def __repr__(self):
         return (
-            f'<ProvinceBattles {self.clan_a_id} vs {self.clan_b_id} '
+            '<ProvinceBattles %s vs %s ' % (
+                self.clan_a and self.clan_a.tag,
+                self.clan_b and self.clan_b.tag,
+            ) +
             f'{self.schedule.province_id}@{self.start_at.date()} [round: {self.round}]>'
         )
 

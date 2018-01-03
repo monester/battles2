@@ -1,31 +1,36 @@
 import React from 'react';
 import moment from 'moment-timezone'
 
+import './css.css'
+
+const rowHeight = 60;
+const cellWidth = 180;
+const titleWidth = 300;
+
+const tzOffset = new Date().getTimezoneOffset();
+
 
 class Cell extends React.Component {
   render() {
     const round = this.props.round;
     const currentTime = this.props.currentTime;
-    const roundTime = new Date(round['time']);
-    const tag = round['clan_a']?round['clan_a']['tag']:"";
-    console.log(roundTime / 10000 - currentTime);
+    const roundTime = moment(round['time']);
+    const tagClanA = round['clan_a']?round['clan_a']['tag']:'';
+    const tagClanB = round['clan_b']?round['clan_b']['tag']:'';
+    const tag = (this.props.clanTag === tagClanA)?tagClanB:tagClanA;
+    console.log(round);
     const style = {
+      marginBottom: '3px',
+      borderLeft: '1px solid #dcdcdc',
       position: 'absolute',
-      left: roundTime / 10000 - currentTime,
-      border: '0px dashed #000',
-      width: '180px',
-      height: '50px',
+      left: (roundTime - currentTime) / 10000,
+      width: (cellWidth + 1) + 'px',
+      height: (rowHeight + 1) + 'px',
       backgroundColor: '#E4F0F5',
       fontSize: '10px',
     };
-    // console.log(round);
     let versus = "";
-    // if(round.clan_a && round.clan_b) {
-    //   versus = ((round.clan_a.tag === clanTag)?round.clan_b:round.clan_a).tag
-    // } else if(round.clan_a) {
-    //   versus = round.clan_a.tag
-    // }
-    const date = new Date(roundTime * 10000).toString();
+    const date = roundTime.format("HH:mm");
     return (
       <div style={style}>{date} {tag}</div>
     )
@@ -35,37 +40,64 @@ class Cell extends React.Component {
 
 class Row extends React.Component {
   render() {
-    const province_id = this.props.province['province_id'];
-    const province_name = this.props.province['province_name'];
-    const prime_time = this.props.province['prime_time'];
+    const provinceId = this.props.province['province_id'];
+    const provinceName = this.props.province['province_name'];
+    const primeTime = this.props.province['prime_time'].split(":").map((value, index) => {
+      let tz;
+      switch(index) {
+        case 0:
+          tz = value - Math.floor(tzOffset / 60);
+          break;
+        case 1:
+          tz = value - tzOffset % 60;
+          break;
+        default:
+          return
+      }
+      return (tz < 10)?("0" + tz):("" + tz)
+    }).filter(e=>e).join(":");
 
     const currentMargin = this.props.currentMargin;
     const currentTime = this.props.currentTime;
-    this.props.province.rounds.forEach(e => {
-      console.log(e)
-    });
     const cells = this.props.province.rounds.map(round =>
-      <Cell key={province_id+round['time']} round={round} currentTime={currentTime} />
+      <Cell key={provinceId + round['time']}
+            round={round}
+            currentTime={currentTime}
+            clanTag={this.props.clanTag} />
     );
     const titleStyle = {
-      marginLeft: '0px',
+      marginLeft: '0',
+      marginRight: '0',
       position: 'absolute',
       left: '0',
+      width: titleWidth + 'px',
+      height: rowHeight + 'px',
+      overflow: 'hidden',
+      padding: '2px 0px 2px 10px',
+      borderRight: '1px solid'
     };
     const outerStyle = {
       overflow: 'hidden',
+      marginLeft: titleWidth + 'px',
     };
     const innerStyle = {
       position: 'relative',
-      height: '50px',
+      height: (rowHeight + 3) + 'px',
       marginLeft: (currentMargin * 50) + 'px',
     };
     return (
-      <div>
+      <div style={{marginLeft: "-" + titleWidth + "px"}} className="province-row">
         <div style={titleStyle}>
-          <a href={"https://ru.wargaming.net/globalmap/#province/" + province_id}>
-          {province_name} {prime_time}
-          </a>
+          <span style={{width: '40px', float: 'left'}}>RU1</span>
+          <span style={{width: '180px', float: 'left'}}>
+            <a href={"https://ru.wargaming.net/globalmap/#province/" + provinceId}>
+              {provinceName}
+            </a>
+          </span>
+          <span style={{width: '50px', float: 'right'}}>{primeTime}</span>
+          <div className="input-group input-group-sm mb-3">
+            <input type="text" className="form-control" />
+          </div>
         </div>
         <div style={outerStyle}>
           <div style={innerStyle}>
@@ -80,56 +112,20 @@ class Row extends React.Component {
 class TimeTable extends React.Component {
   constructor(props) {
     super(props);
+    const currentTime = moment().seconds(0);
+    // by default show 1 hour before now
+    currentTime.subtract(currentTime.minutes() % 30, 'minute');
+    console.log(currentTime.format());
     this.state = {
-      tableWidth: 0,
-      currentTime: new Date() / 10000,
+      currentTime: currentTime,
       currentMargin: 0,
     }
   }
 
-  updateDimensions = () => { this.setState({tableWidth: (document.body.clientWidth - 350) + 'px'}) };
-  componentDidMount() { window.addEventListener("resize", this.updateDimensions); }
-  componentWillMount() { this.updateDimensions(); }
-  componentWillUnmount() { window.removeEventListener("resize", this.updateDimensions); }
-
   render() {
-    // const allTimes = new Set();
-    // this.props.provinces.forEach(province => {
-    //   Object.keys(province.rounds).forEach(key => { allTimes.add(key) })
-    // });
-    //
-    // const timesRow = [];
-    // const times = [];
-    // const now = moment().subtract(1800000);
-    // Array.from(allTimes).sort().forEach(timeStr => {
-    //   const time = moment(timeStr);
-    //   if(! this.props.onlyActive || time > now) {
-    //     times.push(timeStr);
-    //     timesRow.push(<th key={"time"+time}><div className="cell">{time.format("HH:mm")}</div></th>)
-    //   }
-    // });
-
-    // const provinces = this.props.provinces.sort((a, b) => {
-    //   // let key_a =  [
-    //   //   [15, 45].includes(a.prime_time.minutes()),
-    //   //   - a.prime_time.toDate()
-    //   // ];
-    //   // let key_b =  [
-    //   //   [15, 45].includes(b.prime_time.minutes()),
-    //   //   - b.prime_time.toDate()
-    //   // ];
-    //   // return (key_a > key_b)?1:-1
-    //   return 1
-    // }).map(province =>{
-    //   return <ProvinceRow
-    //     key={province.province_id}
-    //     province={province}
-    //     times={times}
-    //     clanTag={this.props.clanTag} />
-    // });
     if(this.props.loading) {
       return (
-        <div style={{width: this.state.tableWidth, textAlign: 'center'}}>
+        <div style={{width: '100%', textAlign: 'center'}}>
         <h1>Loading...</h1>
         </div>
       )
@@ -140,12 +136,13 @@ class TimeTable extends React.Component {
         <Row key={province['province_id']}
              currentTime={currentTime}
              currentMargin={currentMargin}
-             province={province} />
+             province={province}
+             clanTag={this.props.clanTag} />
       );
       const style = {
-        width: '600px',
-        border: '1px solid #000',
-        marginLeft: '200px',
+        width: 'calc(100% - ' + titleWidth + ')',
+        border: '0px solid #000',
+        marginLeft: titleWidth + 'px',
       };
       return (
         <div>

@@ -1,5 +1,6 @@
 import random
 from datetime import datetime, timedelta
+from itertools import zip_longest
 import pytz
 
 from django.core.management.base import BaseCommand, CommandError
@@ -151,11 +152,11 @@ class Command(BaseCommand):
         parser.add_argument('--clans', type=int, default=3)
         parser.add_argument('--owner')
         parser.add_argument('--province')
-        parser.add_argument('--status', default='FINISHED')
-        parser.add_argument('--round', type=int, default=None)
+        parser.add_argument('--status')
+        parser.add_argument('--round', type=int)
 
     def handle(self, *args, **options):
-        clans = Clan.objects.all()[0:options['clans']]
+        all_clans = list(Clan.objects.all())
 
         if options['province']:
             province_data = [i for i in provinces_data
@@ -165,35 +166,73 @@ class Command(BaseCommand):
         province_id = province_data.pop('province_id')
         now = datetime.now(tz=pytz.UTC).replace(microsecond=0)
         today = (now - timedelta(hours=9)).date()
-        battles_start_at = now.replace(minute=0, second=0) + timedelta(hours=1)
+        if options['prime']:
+            hour, minute, *_ = map(int, options['prime'].split(":"))
+            battles_start_at = now.replace(hour=hour, minute=minute, second=0) + timedelta(hours=1)
+            if battles_start_at < now:
+                battles_start_at += timedelta(days=1)
+        else:
+            battles_start_at = now.replace(minute=0, second=0) + timedelta(hours=1)
         province_data['battles_start_at'] = battles_start_at
         province_data['prime_time'] = prime_time = options['prime'] or battles_start_at.time()
-        province_data['round_number'] = options['round']
-        province_data['status'] = status = options['status'] if options['status'] != 'None' else None
-        province_data['owner'] = owner = options['owner'] and Clan.objects.get(tag=options['owner'])
-
-        print(f'./manage.py fake '
-              f'--clans {len(clans)} '
-              f'--province {province_id} '
-              f'--prime-time {prime_time} '
-              f'--owner {owner} '
-              f'--status {status}')
-
-        s = Schedule.objects.update_or_create(province_id=province_id, date=today,
-                                              defaults=province_data)[0]
-
-        if status == 'FINISHED' or status is None:
-            s.pretenders.set(clans)
+        province_data['round_number'] = round_number = options['round']
+        if options['round']:
+            status = 'STARTED'
         else:
-            round_number = options['round']
-            from itertools import zip_longest
+            status = options['status'] if options['status'] != 'None' else None
+        province_data['status'] = status
+        if options['owner'] is None:
+            owner = all_clans[random.randint(0, len(all_clans) - 1)]
+            all_clans.remove(owner)
+        elif options['owner'] == 'None':
+            owner = None
+        else:
+            owner = Clan.objects.get(tag=options['owner'])
+            all_clans.remove(owner)
+
+        province_data['owner'] = owner
+
+        # 1: 2^(1-1)=1  - [0,1,2,3,4,5,6,7]
+        # 2: 2^(2-1)=2  - [0,2,4,6]
+        # 3: 2^(3-1)=4  - [0,4]
+        # 4: 2^(4-1)=8  - [0]
+        if status != 'FINISHED':
+            clans = all_clans[0:options['clans']:pow(2, (round_number or 1) - 1)]
+        else:
+            clans = []
+        print("-" * 80)
+        print("Attacking clans : " + " ".join([c.tag for c in clans]))
+        print("Owner           : %s" % owner.tag)
+        print("-" * 80)
+
+        print(
+            f'./manage.py fake '
+            f'--clans {len(clans)} '
+            f'--province {province_id} '
+            f'--prime {prime_time} '
+            f'--owner {owner.tag} '
+            f'--status {status} '
+            f'--round {round_number} '
+        )
+
+        s = Schedule.objects.update_or_create(
+            province_id=province_id,
+            date=today,
+            defaults=province_data,
+        )[0]
+
+        if status != 'FINISHED':
+            s.pretenders.set(clans)
+        if status is not None:
+            if len(clans) == 1:
+                clans.append(owner)
             s.battles.filter(round=round_number).delete()
             for clan_a, clan_b in zip_longest(clans[::2], clans[1::2]):
                 s.battles.create(
                     clan_a=clan_a,
                     clan_b=clan_b,
                     round=round_number,
-                    start_at=s.battles_start_at,
+                    start_at=s.battles_start_at + timedelta(minutes=30) * (round_number - 1),
                 )
                 clan_a_tag = clan_a.tag
                 clan_b_tag = clan_b and clan_b.tag

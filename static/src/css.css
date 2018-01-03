@@ -1,0 +1,10 @@
+.province-row:nth-child(even) {
+    background: Ivory;
+}
+.province-row:nth-child(odd) {
+    background: #FFFFE0;
+}
+
+* {
+    font-family: 'Roboto', sans-serif;
+}
