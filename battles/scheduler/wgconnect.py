@@ -1,4 +1,3 @@
-import copy
 from datetime import datetime, time
 import pytz
 
@@ -22,16 +21,19 @@ def convert_dt(date):
     return datetime.strptime(date, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=pytz.UTC)
 
 
-def normalize_provinces_data(provinces):
-    for province in provinces:
-        # convert battles_start_at from str to datetime
-        province['battles_start_at'] = convert_dt(province['battles_start_at'])
-        province['prime_time'] = time(*map(int, province['prime_time'].split(':')))
+def normalize_province_data(province):
+    # convert battles_start_at from str to datetime
+    province['battles_start_at'] = convert_dt(province['battles_start_at'])
+    province['prime_time'] = time(*map(int, province['prime_time'].split(':')))
 
-        # convert str to datetime for active battles
-        for battle in province['active_battles']:
-            battle['start_at'] = convert_dt(battle['start_at'])
-    return provinces
+    # convert str to datetime for active battles
+    for battle in province['active_battles']:
+        battle['start_at'] = convert_dt(battle['start_at'])
+    return province
+
+
+def normalize_provinces_data(provinces):
+    return [normalize_province_data(p)for p in provinces]
 
 
 @log_time
@@ -106,72 +108,168 @@ def wot_globalmap_provinces(front_id, province_id):
     }
 
 
-def get_battles_on_province(province_data):
-    """Return all battles ongoing in province"""
-    # battles can be found only in started provinces
-    if province_data['status'] != 'STARTED':
-        return []
+class WGProvinceData:
+    """Class representing all cumulative data for the province from WG API/Game API"""
+    # [WGProvinceData, WGProvinceData, ...]
+    _need_update = []
 
-    battles = []
-    pretenders = set(province_data['competitors'] + province_data['attackers'])
-    owner_clan_id = province_data['owner_clan_id']
-    clans = set()
+    def __init__(self, front_id, province_id):
+        self.key = f'{front_id}/{province_id}'
+        self.front_id = front_id
+        self.province_id = province_id
+        self._data = None
 
-    for battle in province_data['active_battles']:
-        clan_a_id = battle['clan_a']['clan_id']
-        clan_b_id = battle['clan_b']['clan_id']
-        clans.update([clan_a_id, clan_b_id])
-        battles.append({
-            'round': battle['round'],
-            'start_at': battle['start_at'],
-            'clan_a': {'clan_id': clan_a_id},
-            'clan_b': {'clan_id': clan_b_id},
-        })
+    @staticmethod
+    def _fetch_api_provinces_data(grouped):
+        """Get provinces data from WG Public API"""
+        provinces_data = {}
+        for front_id, province_id in grouped.items():
+            raw_data = wot_globalmap_provinces(front_id=front_id, province_id=province_id)
+            for province_data in raw_data.values():
+                key = '{front_id}/{province_id}'.format(
+                    front_id=province_data['front_id'],
+                    province_id=province_data['province_id'])
+                provinces_data[key] = province_data
 
-    # [1,2,3]   = 1v2     => 3 >= 2
-    # [1,2,3,4] = 1v2 3v4 => 4 >= 4
-    # []        = 1v2     => 0 >= 2 !!!
-    if len(pretenders) == len(clans):
-        # all clans have battles in current round
-        return battles
-    elif owner_clan_id in clans:
-        # if battle with owner, then it can be the only one round
-        return battles
-    elif len(pretenders) == len(clans) + 1:
-        # some clan skipped it's round
-        # fake battle should be generated
-        battles.append({
-            'round': province_data['round_number'],
-            'start_at': province_data['battles_start_at'],
-            'clan_a': {'clan_id': (pretenders - clans).pop()},
-            'clan_b': {'clan_id': None},
-        })
-        return battles
+                province_data['pretenders'] = \
+                    province_data.pop('competitors') + province_data.pop('attackers')
 
-    # WG_PAPI didn't return correct values in wot.globalmap.province method
-    # possibly there is no clans in province_data['attackers'] or province_data['competitors']
-    # so getting info about attacking clans from globalmap.
-    # IT IS THE ONLY WAY TO DETECT IF CLAN IS SKIPPING ROUND BECAUSE OF NO OPPONENT
+                if len(province_data['pretenders']) == 0:
+                    continue
 
-    print("HIT LONG: " + province_data['province_id'])
+                # check that battle in provinces has been started
+                if province_data['status'] != 'STARTED':
+                    continue
 
-    if len(province_data['active_battles']) > 0:
-        fake_start_at = province_data['active_battles'][0]['start_at']
-    else:
-        fake_start_at = province_data['battles_start_at']
+                # check that there is at least one battle.
+                # if no battles in province with status 'STARTED' log this error
+                if len(province_data['active_battles']) == 0:
+                    print("ERROR: No battles in province %s with status 'STARTED'!")
 
-    tournament_info = game_api_tournament_info(province_data['province_id'])
-    battles = []
-    for battle in tournament_info['battles']:
-        clan_a_id = battle['first_competitor'] and battle['first_competitor']['id']
-        clan_b_id = battle['second_competitor'] and battle['second_competitor']['id']
-        battles.append({
-            'round': tournament_info['round_number'],
-            'start_at': fake_start_at,
-            'clan_a': {'clan_id': clan_a_id},
-            'clan_b': {'clan_id': clan_b_id},
-        })
-    return battles
+                # collect all clans involved in battles
+                clans_in_battles = set()
+                for battle in province_data['active_battles']:
+                    clans_in_battles.add(battle['clan_a']['clan_id'])
+                    clans_in_battles.add(battle['clan_b']['clan_id'])
+
+                # if there is only ONE clan without battle, then clan is skipping this round
+                # add fake record
+                skipping_clans = len(province_data['pretenders']) - len(clans_in_battles)
+                if skipping_clans == 1:
+                    battle_to_copy = province_data['active_battles'][0]
+                    missing_clan = (set(province_data['pretenders']) - clans_in_battles).pop()
+                    province_data['active_battles'].append({
+                        'clan_a': {'clan_id': missing_clan},
+                        'clan_b': {'clan_id': None},
+                        'start_at': battle_to_copy['start_at'],
+                        'round': battle_to_copy['round'],
+                    })
+                elif skipping_clans > 1:
+                    print("ERROR: more than 1 clan is skipping battles on this province!")
+        return provinces_data
+
+    def _get_memcached(self):
+        self._data = memcache.get(self.key)
+        if not self._data:
+            self.__class__._need_update.append(self)
+        else:
+            self._data = normalize_province_data(self.data)
+
+    @staticmethod
+    def _fetch_data_game_api(province_data):
+        print(province_data)
+        # reset data to avoid incorrect values
+        province_data['active_battles'] = []
+        tournament_info = game_api_tournament_info(province_data['province_id'])
+        for battle in tournament_info['battles']:
+            clan_a = {
+                'clan_id': battle['first_competitor']['id']
+            }
+            clan_b = {
+                'clan_id': None if battle['is_fake'] else battle['second_competitor']['id']
+            }
+
+            province_data['active_battles'].append({
+                'clan_a': clan_a,
+                'clan_b': clan_b,
+                'round': tournament_info['round_number'],
+                # FixMe: set start_at value from tournament_info
+                'start_at': province_data['battles_start_at']
+            })
+        province_data['round_number'] = tournament_info['round_number']
+
+    @classmethod
+    def _update(cls):
+        grouped = {}
+        instances = {}
+
+        # group provinces by fronts
+        while True:
+            try:
+                # Avoiding possible race condition when 2 threads would tries
+                # to update same cache.
+                # pop() is atomic operation
+                instance = cls._need_update.pop()
+                front_id, province_id = instance.front_id, instance.province_id
+            except IndexError:
+                break
+            grouped.setdefault(front_id, []).append(province_id)
+            instances[f'{front_id}/{province_id}'] = instance
+        cls._need_update = []
+
+        # fetch data from PAPI
+        provinces_data = cls._fetch_api_provinces_data(grouped)
+
+        # validate data
+        for province_data in provinces_data.values():
+            active_battles = province_data['active_battles']
+            owner_id = province_data['owner_clan_id']
+
+            # check if there is only one battle with owner
+            if all([
+                owner_id is not None,
+                len(active_battles) == 1,
+                owner_id in [
+                    active_battles[0]['clan_a']['clan_id'],
+                    active_battles[0]['clan_b']['clan_id'],
+                    ]
+                ]):
+                    continue
+
+            if province_data['status'] == 'STARTED' and province_data['pretenders'] == []:
+                # If no attackers clans in PAPI response then it is impossible to
+                # detect if clan has no opponent because there is no such option in PAPI.
+                # Using Unofficial WG API to get required data
+                cls._fetch_data_game_api(province_data)
+
+        # save it to memcache
+        memcache.set_many(provinces_data, 300)
+
+        # fill WGProvinceData instances with updated values
+        for key, province_data in provinces_data.items():
+            instances[key].data = normalize_province_data(province_data)
+
+    @property
+    def data(self):
+        if self._data:
+            return self._data
+        self._get_memcached()
+        if not self._data:
+            self._update()
+        return self._data
+
+    @data.setter
+    def data(self, value):
+        self._data = value
+
+    def __getitem__(self, item):
+        return self.data[item]
+
+    # to make set(provinces_list) working correctly
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.key == other.key
+        return self.data == other
 
 
 class WGClanBattles:
@@ -204,27 +302,6 @@ class WGClanBattles:
                 wot_globalmap_clanprovinces(self.clan_id)
         return self._wg_papi_clan_provinces[str(self.clan_id)] or []
 
-    @property
-    def wg_papi_provinces(self):
-        """wot.globalmap.clanprovinces"""
-        if self._wg_papi_provinces is not None:
-            return self._wg_papi_provinces
-
-        involved_provinces = {}
-        for front_id, province_id in self.list_involved_provinces():
-            involved_provinces.setdefault(front_id, set()).add(province_id)
-
-        provinces_data = []
-        for front_id, provinces_ids in involved_provinces.items():
-            data = wot_globalmap_provinces(
-                front_id=front_id,
-                province_id=provinces_ids
-            )
-            for province_data in data.values():
-                provinces_data.append(province_data)
-        self._wg_papi_provinces = provinces_data
-        return provinces_data
-
     def list_involved_provinces(self):
         # planned battles from unofficial api and WG_PAPI
         all_battles = self.game_api_clan_battles['battles'] + \
@@ -239,11 +316,6 @@ class WGClanBattles:
 
     def get_clan_related_provinces(self):
         provinces = []
-        for province_data in self.wg_papi_provinces:
-            battles = get_battles_on_province(province_data)
-            province = copy.deepcopy(province_data)
-            province['pretenders'] = province.pop('attackers') + \
-                                     province.pop('competitors')
-            province['active_battles'] = battles
-            provinces.append(province)
-        return normalize_provinces_data(provinces)
+        for front_id, province_id in self.list_involved_provinces():
+            provinces.append(WGProvinceData(front_id, province_id))
+        return provinces

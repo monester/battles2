@@ -19,8 +19,7 @@ def get_today():
 
 
 def get_battle_date(battle_dt):
-    # MSK Prime_time  starts at 9 AM UTC
-    return (battle_dt - timedelta(hours=9)).date()
+    return (battle_dt - timedelta(hours=settings.PRIME_STARTS_AT_HOUR)).date()
 
 
 class MyDjangoJSONEncoder(DjangoJSONEncoder):
@@ -32,6 +31,7 @@ class MyDjangoJSONEncoder(DjangoJSONEncoder):
 
 def get_active_clan_schedules_by_date(clan, date):
     schedules = Schedule.objects. \
+        distinct('province_id'). \
         prefetch_related('pretenders').filter(
             date__gte=date). \
         exclude(status='FINISHED'). \
@@ -88,11 +88,17 @@ class FetchClanDataView(View):
                 round=schedule.round_number).filter(Q(clan_a=clan) | Q(clan_b=clan)),
         ]
 
+        # get clan involved provinces for today
         today_schedule = get_active_clan_schedules_by_date(clan, today)
+
+        # fill data to send to client
         provinces_data = {}
         for schedule in set(today_schedule):
             province_id = schedule.province_id
             battles = schedule.get_battle_times(clan)
+
+            # if no active/planned battles for province - skip it
+            # clan is owner of the province
             if not battles:
                 continue
 
@@ -100,13 +106,7 @@ class FetchClanDataView(View):
             if not any(predicate(schedule, clan) for predicate in predicates):
                 continue
 
-            if province_id not in provinces_data:
-                provinces_data[province_id] = battles
-            else:
-                provinces_data[province_id]['rounds'] += battles['rounds']
-
-        for province_data in provinces_data.values():
-            province_data['rounds'].sort(key=lambda x: x['time'])
+            provinces_data[province_id] = battles
 
         response = JsonResponse({
             'clan': {'clan_id': clan.id, 'tag': clan.tag},
@@ -114,24 +114,6 @@ class FetchClanDataView(View):
         }, encoder=MyDjangoJSONEncoder)
         response['Access-Control-Allow-Origin'] = '*'
         return response
-
-    # def province_status(self, date, data):
-    #     # statuses: ['not started', 'started', 'finished', None]
-    #     # | 0 ..... 9 ..... 17 ..... 18 ..... 19 ..... 20 ..... 21 ..... 22 ..... 23 ..... 24 | 0 ..... 9 ...........
-    #     # Finished  | Not Started ........... | Started ....... | Finished ................... Finished | Not Started
-    #     # Finished  | Not Started ........... | Started ....... | Finished ................... Finished | Not Started
-    #     dt = data['battles_start_at']
-    #     if dt.hour() < 9:
-    #         pass
-
-    # @staticmethod
-    # def update_clans_info(clan_ids):
-    #     clan_ids = [i.id for i in clan_ids if not i.tag]
-    #     if clan_ids:
-    #         for clan_data in wgn.clans.info(clan_id=clan_ids, fields=['clan_id', 'tag']).values():
-    #             Clan.objects.update_or_create(id=clan_data['clan_id'], defaults={
-    #                 'tag': clan_data['tag']
-    #             })
 
     @staticmethod
     def update_province(province_data):

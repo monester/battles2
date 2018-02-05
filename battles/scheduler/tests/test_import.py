@@ -10,12 +10,17 @@ from scheduler.wgconnect import wot_globalmap_provinces
 class TestWGConnectWrappers(TestCase):
     def setUp(self):
         self.memcache = patch('scheduler.util.memcache')
+        self.memcache2 = patch('scheduler.wgconnect.memcache')
         memcache = self.memcache.start()
         memcache.get.return_value = None
         memcache.get_many.return_value = {}
+        memcache2 = self.memcache2.start()
+        memcache2.get.return_value = None
+        memcache2.get_many.return_value = {}
 
     def tearDown(self):
         self.memcache.stop()
+        self.memcache2.stop()
 
     @patch('scheduler.wgconnect.wot')
     def test_wot_globalmap_provinces(self, wot):
@@ -42,6 +47,14 @@ class TestWGConnectWrappers(TestCase):
 
 class TestWGClanBattles(TestCase):
     def setUp(self):
+        self.memcache = patch('scheduler.util.memcache')
+        self.memcache2 = patch('scheduler.wgconnect.memcache')
+        memcache = self.memcache.start()
+        memcache.get.return_value = None
+        memcache.get_many.return_value = {}
+        memcache2 = self.memcache2.start()
+        memcache2.get.return_value = None
+        memcache2.get_many.return_value = {}
         self.not_started_provinces = {
             'province_id': {
                 'active_battles': [],
@@ -59,6 +72,10 @@ class TestWGClanBattles(TestCase):
                 'status': 'FINISHED',
             }
         }
+
+    def tearDown(self):
+        self.memcache.stop()
+        self.memcache2.stop()
 
     @patch('scheduler.wgconnect.wot_globalmap_provinces')
     @patch('scheduler.wgconnect.game_api_clan_battles')
@@ -310,12 +327,15 @@ class TestWGClanBattles(TestCase):
         game_api_tournament_info.return_value = {
             'round_number': 1,
             'battles': [{
+                'is_fake': False,
                 'first_competitor': {'id': 1},
                 'second_competitor': {'id': 2},
             }, {
+                'is_fake': False,
                 'first_competitor': {'id': 3},
                 'second_competitor': {'id': 4},
             },{
+                'is_fake': True,
                 'first_competitor': {'id': 5},
                 'second_competitor': None,
             }]
